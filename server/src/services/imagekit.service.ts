@@ -29,20 +29,21 @@ export class ImageKitService implements StorageAdapter {
   async listFolder(path = '/'): Promise<FolderContents> {
     const folderPath = path.startsWith('/') ? path : `/${path}`;
 
-    const [files, folders] = await Promise.all([
+    const [files, foldersRaw] = await Promise.all([
       this.ik.listFiles({ path: folderPath, limit: 50 } as Parameters<typeof this.ik.listFiles>[0]),
-      this.ik.getFolderDetails({ folderPath }).then(() =>
-        this.ik.listFiles({ type: 'folder', path: folderPath } as Parameters<typeof this.ik.listFiles>[0])
-      ).catch(() => [] as Awaited<ReturnType<typeof this.ik.listFiles>>),
+      this.ik.listFiles({ type: 'folder', path: folderPath } as Parameters<typeof this.ik.listFiles>[0])
+        .catch(() => [] as unknown[]),
     ]);
 
-    const folderItems: MediaItem[] = (folders as Array<{ fileId: string; name: string; folderPath: string }>)
-      .filter((f) => f && 'folderPath' in f)
+    const folders = foldersRaw as Array<{ fileId: string; name: string; filePath: string }>;
+
+    const folderItems: MediaItem[] = (folders || [])
+      .filter((f) => f && 'filePath' in f)
       .map((f) => ({
         id: f.fileId,
         name: f.name,
         type: 'folder' as const,
-        path: f.folderPath,
+        path: f.filePath,
       }));
 
     const fileItems: MediaItem[] = (files as Array<{
@@ -134,7 +135,7 @@ export class ImageKitService implements StorageAdapter {
     await this.ik.createFolder({ folderName, parentFolderPath });
   }
 
-  async renameResource(fileId: string, newFileName: string): Promise<void> {
-    await this.ik.renameFile({ fileId, newFileName } as Parameters<typeof this.ik.renameFile>[0]);
+  async renameResource(filePath: string, newFileName: string): Promise<void> {
+    await this.ik.renameFile({ filePath, newFileName, purgeCache: false });
   }
 }
