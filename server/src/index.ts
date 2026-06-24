@@ -14,6 +14,7 @@ import storageRoutes from './routes/storage';
 import sharesRoutes from './routes/shares';
 import proxyRoutes from './routes/proxy';
 import adminRoutes from './routes/admin';
+import inviteRoutes from './routes/invites';
 import { errorHandler, notFound } from './middleware/errorHandler';
 
 const app = express();
@@ -58,6 +59,7 @@ app.use('/api/storage', storageRoutes);
 app.use('/api/shares', sharesRoutes);
 app.use('/api/proxy', proxyRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/invites', inviteRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

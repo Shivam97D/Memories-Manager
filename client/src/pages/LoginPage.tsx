@@ -11,7 +11,10 @@ export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const setAuth = useAuthStore((s) => s.setAuth);
-  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/dashboard';
+  const params = new URLSearchParams(location.search);
+  const inviteToken = params.get('invite');
+  const stateFrom = (location.state as { from?: { pathname: string } })?.from?.pathname;
+  const from = inviteToken ? `/invite/${inviteToken}` : stateFrom || '/dashboard';
 
   const [form, setForm] = useState({ email: '', password: '' });
   const [loading, setLoading] = useState(false);
@@ -82,7 +85,10 @@ export function LoginPage() {
 
         <p className="text-center text-sm text-muted-foreground">
           Don't have an account?{' '}
-          <Link to="/register" className="text-primary font-medium hover:underline">
+          <Link
+            to={inviteToken ? `/register?invite=${inviteToken}` : '/register'}
+            className="text-primary font-medium hover:underline"
+          >
             Sign up
           </Link>
         </p>

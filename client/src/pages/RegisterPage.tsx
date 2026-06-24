@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Mail, Lock, User, Phone, Image } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,7 +11,12 @@ type Step = 'register' | 'verify';
 
 export function RegisterPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const setAuth = useAuthStore((s) => s.setAuth);
+  const params = new URLSearchParams(location.search);
+  const inviteToken = params.get('invite');
+  const afterAuth = inviteToken ? `/invite/${inviteToken}` : '/dashboard';
+
   const [step, setStep] = useState<Step>('register');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
@@ -35,12 +40,10 @@ export function RegisterPage() {
       });
 
       if (data.accessToken) {
-        // Email verification is off — server issued tokens immediately
         setAuth(data.user, data.accessToken, data.refreshToken);
         toast.success('Account created! Welcome to PixelVault.');
-        navigate('/dashboard');
+        navigate(afterAuth, { replace: true });
       } else {
-        // Email verification is on — proceed to OTP step
         setEmail(form.email);
         setStep('verify');
         toast.success('Check your email for the verification code');
@@ -63,7 +66,7 @@ export function RegisterPage() {
     try {
       const { data } = await api.post('/auth/verify-email', { email, otp });
       setAuth(data.user, data.accessToken, data.refreshToken);
-      navigate('/dashboard');
+      navigate(afterAuth, { replace: true });
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Verification failed';
       toast.error(msg);
@@ -90,13 +93,15 @@ export function RegisterPage() {
           </div>
           <h1 className="text-2xl font-bold">{step === 'register' ? 'Create account' : 'Verify email'}</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            {step === 'register' ? 'Start managing your media libraries' : `Enter the 6-digit code sent to ${email}`}
+            {step === 'register'
+              ? inviteToken ? 'Create an account to access the shared folder' : 'Start managing your media libraries'
+              : `Enter the 6-digit code sent to ${email}`}
           </p>
         </div>
 
         {step === 'register' ? (
           <form onSubmit={handleRegister} className="space-y-4 bg-card border border-border rounded-xl p-6">
-            <Input label="Full Name" placeholder="Shivam Dahifale" value={form.name} onChange={set('name')} icon={<User className="h-4 w-4" />} required />
+            <Input label="Full Name" placeholder="Your name" value={form.name} onChange={set('name')} icon={<User className="h-4 w-4" />} required />
             <Input label="Email" type="email" placeholder="you@example.com" value={form.email} onChange={set('email')} icon={<Mail className="h-4 w-4" />} required />
             <Input label="Phone (optional)" type="tel" placeholder="+91 9876543210" value={form.phone} onChange={set('phone')} icon={<Phone className="h-4 w-4" />} />
             <Input label="Password" type="password" placeholder="Min 8 characters" value={form.password} onChange={set('password')} icon={<Lock className="h-4 w-4" />} required />
@@ -123,7 +128,12 @@ export function RegisterPage() {
 
         <p className="text-center text-sm text-muted-foreground">
           Already have an account?{' '}
-          <Link to="/login" className="text-primary font-medium hover:underline">Sign in</Link>
+          <Link
+            to={inviteToken ? `/login?invite=${inviteToken}` : '/login'}
+            className="text-primary font-medium hover:underline"
+          >
+            Sign in
+          </Link>
         </p>
       </div>
     </div>
