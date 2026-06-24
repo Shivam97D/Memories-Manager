@@ -57,7 +57,7 @@ router.post(
       await sendEmail({
         to: email,
         subject: 'Verify your PixelVault account',
-        html: otpEmailHtml(otp, name),
+        html: otpEmailHtml(otp, name, email),
       });
 
       res.status(201).json({ message: 'Registered. Check email for OTP.', userId: user._id });
@@ -158,7 +158,7 @@ router.post(
       user.otp = otp;
       user.otpExpiresAt = new Date(Date.now() + env.OTP_EXPIRES_MINUTES * 60 * 1000);
       await user.save();
-      await sendEmail({ to: email, subject: 'Your PixelVault OTP', html: otpEmailHtml(otp, user.name) });
+      await sendEmail({ to: email, subject: 'Your PixelVault OTP', html: otpEmailHtml(otp, user.name, email) });
       res.json({ message: 'OTP sent' });
     } catch (err) {
       next(err);
