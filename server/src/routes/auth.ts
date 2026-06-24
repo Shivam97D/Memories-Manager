@@ -6,6 +6,7 @@ import { generateOTP } from '../utils/otp';
 import { sendEmail, otpEmailHtml, resetPasswordEmailHtml } from '../utils/email';
 import { env } from '../config/env';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { getSettings } from '../models/SiteSettings';
 
 const router = Router();
 
@@ -47,15 +48,29 @@ router.post(
       const existing = await User.findOne({ email });
       if (existing) { res.status(409).json({ error: 'Email already registered' }); return; }
 
+      const userCount = await User.countDocuments();
+      const isAdmin = userCount === 0 || (env.ADMIN_EMAIL && email === env.ADMIN_EMAIL);
+      const settings = await getSettings();
+
+      if (!settings.emailVerificationEnabled) {
+        // Verification off — create verified user and return tokens immediately
+        const user = await User.create({
+          name, email, phone, passwordHash: password,
+          emailVerified: true,
+          role: isAdmin ? 'admin' : 'user',
+        });
+        const accessToken = signAccessToken({ userId: String(user._id), email: user.email, role: user.role });
+        const refreshToken = signRefreshToken({ userId: String(user._id), email: user.email, role: user.role });
+        user.refreshTokens.push(refreshToken);
+        await user.save();
+        res.status(201).json({ message: 'Registered successfully.', accessToken, refreshToken, user: userPayload(user) });
+        return;
+      }
+
+      // Verification on — send OTP email FIRST, only create user if email succeeds
       const otp = generateOTP();
       const otpExpiresAt = new Date(Date.now() + env.OTP_EXPIRES_MINUTES * 60 * 1000);
 
-      // First-ever registration or ADMIN_EMAIL match → admin role
-      const userCount = await User.countDocuments();
-      const isAdmin = userCount === 0 || (env.ADMIN_EMAIL && email === env.ADMIN_EMAIL);
-
-      // Send email FIRST — only create the user if delivery succeeds.
-      // This prevents phantom accounts that can't be verified.
       try {
         await sendEmail({
           to: email,
@@ -128,10 +143,13 @@ router.post(
         res.status(401).json({ error: 'Invalid credentials' });
         return;
       }
-      if (!user.emailVerified) {
+
+      const loginSettings = await getSettings();
+      if (!user.emailVerified && loginSettings.emailVerificationEnabled) {
         res.status(403).json({ error: 'Email not verified. Check your inbox.' });
         return;
       }
+
       if (user.isSuspended) {
         res.status(403).json({ error: 'Your account has been suspended. Contact support.' });
         return;

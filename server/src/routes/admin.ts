@@ -4,6 +4,7 @@ import { User } from '../models/User';
 import { StorageAccount } from '../models/StorageAccount';
 import { PlatformShare } from '../models/PlatformShare';
 import { ActivityLog } from '../models/ActivityLog';
+import { getSettings } from '../models/SiteSettings';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -146,6 +147,29 @@ router.delete('/users/:id', async (req: AuthRequest, res: Response, next: NextFu
     res.json({ message: 'User and all associated data deleted' });
   } catch (err) { next(err); }
 });
+
+// GET /admin/settings
+router.get('/settings', async (_req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const settings = await getSettings();
+    res.json({ emailVerificationEnabled: settings.emailVerificationEnabled });
+  } catch (err) { next(err); }
+});
+
+// PATCH /admin/settings
+router.patch(
+  '/settings',
+  [body('emailVerificationEnabled').isBoolean().withMessage('Must be boolean')],
+  validate,
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const settings = await getSettings();
+      settings.emailVerificationEnabled = req.body.emailVerificationEnabled as boolean;
+      await settings.save();
+      res.json({ emailVerificationEnabled: settings.emailVerificationEnabled });
+    } catch (err) { next(err); }
+  }
+);
 
 // GET /admin/activity?limit=50
 router.get('/activity', async (req: AuthRequest, res: Response, next: NextFunction) => {

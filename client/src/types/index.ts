@@ -106,3 +106,7 @@ export interface ActivityLog {
 }
 
 export type CardType = 'account' | 'shared-album';
+
+export interface SiteSettings {
+  emailVerificationEnabled: boolean;
+}

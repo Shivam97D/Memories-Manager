@@ -27,10 +27,24 @@ export function RegisterPage() {
     if (form.password.length < 8) { toast.error('Password must be at least 8 characters'); return; }
     setLoading(true);
     try {
-      await api.post('/auth/register', { name: form.name, email: form.email, phone: form.phone || undefined, password: form.password });
-      setEmail(form.email);
-      setStep('verify');
-      toast.success('Check your email for the verification code');
+      const { data } = await api.post('/auth/register', {
+        name: form.name,
+        email: form.email,
+        phone: form.phone || undefined,
+        password: form.password,
+      });
+
+      if (data.accessToken) {
+        // Email verification is off — server issued tokens immediately
+        setAuth(data.user, data.accessToken, data.refreshToken);
+        toast.success('Account created! Welcome to PixelVault.');
+        navigate('/dashboard');
+      } else {
+        // Email verification is on — proceed to OTP step
+        setEmail(form.email);
+        setStep('verify');
+        toast.success('Check your email for the verification code');
+      }
     } catch (err: unknown) {
       const e = err as { code?: string; response?: { data?: { error?: string } } };
       const msg =

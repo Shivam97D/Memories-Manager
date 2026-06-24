@@ -3,16 +3,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Users, LayoutDashboard, Shield, ShieldOff, Trash2,
   Search, ChevronLeft, ChevronRight, Activity,
-  UserCog, CheckCircle, XCircle, Crown,
+  UserCog, CheckCircle, XCircle, Crown, Settings2, Mail, MailX,
 } from 'lucide-react';
 import { api } from '@/lib/api';
-import { AdminUser } from '@/types';
+import { AdminUser, SiteSettings } from '@/types';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { cn, getInitials, timeAgo } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
-type Tab = 'stats' | 'users' | 'activity';
+type Tab = 'stats' | 'users' | 'activity' | 'settings';
 
 interface Stats {
   totalUsers: number;
@@ -93,6 +92,26 @@ export function AdminPage() {
     enabled: tab === 'activity',
   });
 
+  const { data: siteSettings, isLoading: settingsLoading } = useQuery<SiteSettings>({
+    queryKey: ['admin-settings'],
+    queryFn: () => api.get('/admin/settings').then((r) => r.data),
+    enabled: tab === 'settings',
+  });
+
+  const settingsMut = useMutation({
+    mutationFn: (emailVerificationEnabled: boolean) =>
+      api.patch('/admin/settings', { emailVerificationEnabled }).then((r) => r.data),
+    onSuccess: (data: SiteSettings) => {
+      qc.setQueryData(['admin-settings'], data);
+      toast.success(
+        data.emailVerificationEnabled
+          ? 'Email verification enabled'
+          : 'Email verification disabled — users can sign up and log in directly'
+      );
+    },
+    onError: () => toast.error('Failed to update settings'),
+  });
+
   const roleMut = useMutation({
     mutationFn: ({ id, role }: { id: string; role: string }) =>
       api.patch(`/admin/users/${id}/role`, { role }),
@@ -140,6 +159,7 @@ export function AdminPage() {
     { id: 'stats', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" /> },
     { id: 'users', label: 'Users', icon: <Users className="h-4 w-4" /> },
     { id: 'activity', label: 'Activity', icon: <Activity className="h-4 w-4" /> },
+    { id: 'settings', label: 'Settings', icon: <Settings2 className="h-4 w-4" /> },
   ];
 
   return (
@@ -354,6 +374,76 @@ export function AdminPage() {
                 </div>
               )}
             </>
+          )}
+        </div>
+      )}
+
+      {/* SETTINGS TAB */}
+      {tab === 'settings' && (
+        <div className="space-y-4 max-w-lg">
+          {settingsLoading ? (
+            <div className="bg-card border border-border rounded-xl h-24 animate-pulse" />
+          ) : (
+            <div className="bg-card border border-border rounded-xl p-5 space-y-5">
+              <div>
+                <h3 className="font-semibold text-sm">Authentication Settings</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">Control how users sign up and log in</p>
+              </div>
+
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className={cn(
+                    'w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5',
+                    siteSettings?.emailVerificationEnabled ? 'bg-green-100 text-green-600' : 'bg-secondary text-muted-foreground'
+                  )}>
+                    {siteSettings?.emailVerificationEnabled
+                      ? <Mail className="h-4 w-4" />
+                      : <MailX className="h-4 w-4" />
+                    }
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Email Verification</p>
+                    <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                      {siteSettings?.emailVerificationEnabled
+                        ? 'Users must verify their email via OTP before accessing the app.'
+                        : 'Off — users can register and log in directly without email verification.'
+                      }
+                    </p>
+                  </div>
+                </div>
+
+                {/* Toggle */}
+                <button
+                  role="switch"
+                  aria-checked={siteSettings?.emailVerificationEnabled ?? false}
+                  disabled={settingsMut.isPending}
+                  onClick={() => settingsMut.mutate(!(siteSettings?.emailVerificationEnabled ?? false))}
+                  className={cn(
+                    'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50',
+                    siteSettings?.emailVerificationEnabled ? 'bg-green-500' : 'bg-secondary'
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transform transition duration-200',
+                      siteSettings?.emailVerificationEnabled ? 'translate-x-5' : 'translate-x-0'
+                    )}
+                  />
+                </button>
+              </div>
+
+              <div className={cn(
+                'rounded-lg px-4 py-3 text-xs leading-relaxed',
+                siteSettings?.emailVerificationEnabled
+                  ? 'bg-green-50 text-green-800 border border-green-200'
+                  : 'bg-amber-50 text-amber-800 border border-amber-200'
+              )}>
+                {siteSettings?.emailVerificationEnabled
+                  ? 'Email verification is active. Make sure SMTP is configured on Render for emails to deliver.'
+                  : 'Email verification is off. New users are created as verified and logged in immediately after sign-up.'
+                }
+              </div>
+            </div>
           )}
         </div>
       )}
