@@ -3,7 +3,6 @@ import { verifyAccessToken, TokenPayload } from '../utils/jwt';
 
 export interface AuthRequest extends Request {
   user?: TokenPayload;
-  // Re-declared explicitly so TypeScript sees them in all strict contexts
   params: Record<string, string>;
   query: Record<string, string | string[] | undefined>;
   body: Record<string, unknown>;
@@ -22,4 +21,16 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
   } catch {
     res.status(401).json({ error: 'Invalid or expired token' });
   }
+}
+
+export function requireAdmin(req: AuthRequest, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  if (req.user.role !== 'admin') {
+    res.status(403).json({ error: 'Admin access required' });
+    return;
+  }
+  next();
 }

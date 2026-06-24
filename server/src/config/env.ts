@@ -29,4 +29,7 @@ export const env = {
   EMAIL_FROM: process.env.EMAIL_FROM || 'noreply@pixelvault.app',
 
   OTP_EXPIRES_MINUTES: parseInt(process.env.OTP_EXPIRES_MINUTES || '10', 10),
+
+  // Email of the site owner — automatically gets admin role on login
+  ADMIN_EMAIL: process.env.ADMIN_EMAIL || '',
 };

@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutGrid, Share2, CloudUpload, Settings, LogOut, Image, X } from 'lucide-react';
+import { LayoutGrid, Share2, CloudUpload, Settings, LogOut, Image, X, Shield } from 'lucide-react';
 import { cn, getInitials } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
 import { api } from '@/lib/api';
@@ -17,6 +17,7 @@ interface Props {
 
 export function Sidebar({ onClose }: Props) {
   const { user, logout, refreshToken } = useAuthStore();
+  const isAdmin = user?.role === 'admin';
 
   const handleLogout = async () => {
     try { await api.post('/auth/logout', { refreshToken }); } catch {}
@@ -60,16 +61,48 @@ export function Sidebar({ onClose }: Props) {
             {label}
           </NavLink>
         ))}
+
+        {/* Admin link — only for admins */}
+        {isAdmin && (
+          <>
+            <div className="my-2 h-px bg-border" />
+            <NavLink
+              to="/admin"
+              onClick={onClose}
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                  isActive
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                )
+              }
+            >
+              <Shield className="h-4 w-4 flex-shrink-0" />
+              Admin Panel
+            </NavLink>
+          </>
+        )}
       </nav>
 
-      {/* User */}
+      {/* User footer */}
       <div className="p-3 border-t border-border flex-shrink-0">
         <div className="flex items-center gap-3 px-2 py-2">
-          <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+          <div className={cn(
+            'w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0',
+            isAdmin ? 'bg-primary text-white' : 'bg-secondary'
+          )}>
             {user ? getInitials(user.name) : 'U'}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{user?.name}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-sm font-medium truncate">{user?.name}</p>
+              {isAdmin && (
+                <span className="text-[10px] bg-primary/10 text-primary font-medium px-1.5 py-0.5 rounded-full flex-shrink-0">
+                  admin
+                </span>
+              )}
+            </div>
             <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
           </div>
           <button onClick={handleLogout} className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0" title="Logout">

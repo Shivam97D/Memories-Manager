@@ -1,12 +1,16 @@
 import mongoose, { Document, Schema } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
+export type UserRole = 'user' | 'admin';
+
 export interface IUser extends Document {
   _id: mongoose.Types.ObjectId;
   name: string;
   email: string;
   phone?: string;
   avatar?: string;
+  role: UserRole;
+  isSuspended: boolean;
   passwordHash: string;
   emailVerified: boolean;
   otp?: string;
@@ -23,6 +27,8 @@ const UserSchema = new Schema<IUser>(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     phone: { type: String, trim: true },
     avatar: { type: String },
+    role: { type: String, enum: ['user', 'admin'], default: 'user' },
+    isSuspended: { type: Boolean, default: false },
     passwordHash: { type: String, required: true },
     emailVerified: { type: Boolean, default: false },
     otp: { type: String },

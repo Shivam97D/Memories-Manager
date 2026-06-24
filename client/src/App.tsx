@@ -4,6 +4,7 @@ import { Toaster } from 'react-hot-toast';
 
 import { Layout } from '@/components/layout/Layout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { AdminRoute } from '@/components/auth/AdminRoute';
 import { LoginPage } from '@/pages/LoginPage';
 import { RegisterPage } from '@/pages/RegisterPage';
 import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage';
@@ -13,6 +14,7 @@ import { SharedManagerPage } from '@/pages/SharedManagerPage';
 import { SharesPage } from '@/pages/SharesPage';
 import { MySharesPage } from '@/pages/MySharesPage';
 import { ProfilePage } from '@/pages/ProfilePage';
+import { AdminPage } from '@/pages/AdminPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -48,6 +50,14 @@ export default function App() {
             <Route path="/shares" element={<SharesPage />} />
             <Route path="/my-shares" element={<MySharesPage />} />
             <Route path="/profile" element={<ProfilePage />} />
+            <Route
+              path="/admin"
+              element={
+                <AdminRoute>
+                  <AdminPage />
+                </AdminRoute>
+              }
+            />
           </Route>
 
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

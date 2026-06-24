@@ -1,6 +1,7 @@
 export type StorageAccountType = 'GOOGLE_PHOTOS' | 'CLOUDINARY' | 'IMAGEKIT' | 'BACKBLAZE' | 'OTHER';
 export type Permission = 'VIEW' | 'DOWNLOAD' | 'EDIT' | 'DELETE';
 export type ResourceType = 'FOLDER' | 'FILE';
+export type UserRole = 'user' | 'admin';
 
 export interface User {
   id: string;
@@ -8,6 +9,19 @@ export interface User {
   email: string;
   phone?: string;
   avatar?: string;
+  role: UserRole;
+  createdAt: string;
+}
+
+export interface AdminUser {
+  _id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  role: UserRole;
+  isSuspended: boolean;
+  emailVerified: boolean;
+  accountCount: number;
   createdAt: string;
 }
 

@@ -7,6 +7,7 @@ const titles: Record<string, string> = {
   '/shares': 'Shared with Me',
   '/my-shares': 'My Shares',
   '/profile': 'Profile',
+  '/admin': 'Admin Panel',
   '/manager': 'File Manager',
   '/shared-manager': 'Shared Folder',
 };

@@ -18,6 +18,17 @@ const validate = (req: Request, res: Response, next: NextFunction) => {
   next();
 };
 
+function userPayload(user: InstanceType<typeof User>) {
+  return {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone,
+    avatar: user.avatar,
+    role: user.role,
+  };
+}
+
 // POST /auth/register
 router.post(
   '/register',
@@ -30,28 +41,22 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { name, email, password, phone } = req.body as {
-        name: string;
-        email: string;
-        password: string;
-        phone?: string;
+        name: string; email: string; password: string; phone?: string;
       };
 
       const existing = await User.findOne({ email });
-      if (existing) {
-        res.status(409).json({ error: 'Email already registered' });
-        return;
-      }
+      if (existing) { res.status(409).json({ error: 'Email already registered' }); return; }
 
       const otp = generateOTP();
       const otpExpiresAt = new Date(Date.now() + env.OTP_EXPIRES_MINUTES * 60 * 1000);
 
-      const user = await User.create({
-        name,
-        email,
-        phone,
-        passwordHash: password,
-        otp,
-        otpExpiresAt,
+      // First-ever registration or ADMIN_EMAIL match → admin role
+      const userCount = await User.countDocuments();
+      const isAdmin = userCount === 0 || (env.ADMIN_EMAIL && email === env.ADMIN_EMAIL);
+
+      await User.create({
+        name, email, phone, passwordHash: password, otp, otpExpiresAt,
+        role: isAdmin ? 'admin' : 'user',
       });
 
       await sendEmail({
@@ -60,10 +65,8 @@ router.post(
         html: otpEmailHtml(otp, name, email),
       });
 
-      res.status(201).json({ message: 'Registered. Check email for OTP.', userId: user._id });
-    } catch (err) {
-      next(err);
-    }
+      res.status(201).json({ message: 'Registered. Check email for OTP.' });
+    } catch (err) { next(err); }
   }
 );
 
@@ -87,35 +90,32 @@ router.post(
       user.emailVerified = true;
       user.otp = undefined;
       user.otpExpiresAt = undefined;
-      const accessToken = signAccessToken({ userId: String(user._id), email: user.email });
-      const refreshToken = signRefreshToken({ userId: String(user._id), email: user.email });
+
+      // Auto-promote if this is the ADMIN_EMAIL
+      if (env.ADMIN_EMAIL && user.email === env.ADMIN_EMAIL && user.role !== 'admin') {
+        user.role = 'admin';
+      }
+
+      const accessToken = signAccessToken({ userId: String(user._id), email: user.email, role: user.role });
+      const refreshToken = signRefreshToken({ userId: String(user._id), email: user.email, role: user.role });
       user.refreshTokens.push(refreshToken);
       await user.save();
 
-      res.json({
-        message: 'Email verified',
-        accessToken,
-        refreshToken,
-        user: { id: user._id, name: user.name, email: user.email, phone: user.phone, avatar: user.avatar },
-      });
-    } catch (err) {
-      next(err);
-    }
+      res.json({ message: 'Email verified', accessToken, refreshToken, user: userPayload(user) });
+    } catch (err) { next(err); }
   }
 );
 
 // POST /auth/login
 router.post(
   '/login',
-  [
-    body('email').isEmail().normalizeEmail(),
-    body('password').notEmpty(),
-  ],
+  [body('email').isEmail().normalizeEmail(), body('password').notEmpty()],
   validate,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email, password } = req.body as { email: string; password: string };
       const user = await User.findOne({ email });
+
       if (!user || !(await user.comparePassword(password))) {
         res.status(401).json({ error: 'Invalid credentials' });
         return;
@@ -124,22 +124,24 @@ router.post(
         res.status(403).json({ error: 'Email not verified. Check your inbox.' });
         return;
       }
+      if (user.isSuspended) {
+        res.status(403).json({ error: 'Your account has been suspended. Contact support.' });
+        return;
+      }
 
-      const accessToken = signAccessToken({ userId: String(user._id), email: user.email });
-      const refreshToken = signRefreshToken({ userId: String(user._id), email: user.email });
+      // Auto-promote if ADMIN_EMAIL matches and not already admin
+      if (env.ADMIN_EMAIL && user.email === env.ADMIN_EMAIL && user.role !== 'admin') {
+        user.role = 'admin';
+      }
+
+      const accessToken = signAccessToken({ userId: String(user._id), email: user.email, role: user.role });
+      const refreshToken = signRefreshToken({ userId: String(user._id), email: user.email, role: user.role });
       user.refreshTokens.push(refreshToken);
-      // keep only last 5 refresh tokens
       if (user.refreshTokens.length > 5) user.refreshTokens = user.refreshTokens.slice(-5);
       await user.save();
 
-      res.json({
-        accessToken,
-        refreshToken,
-        user: { id: user._id, name: user.name, email: user.email, phone: user.phone, avatar: user.avatar },
-      });
-    } catch (err) {
-      next(err);
-    }
+      res.json({ accessToken, refreshToken, user: userPayload(user) });
+    } catch (err) { next(err); }
   }
 );
 
@@ -160,13 +162,11 @@ router.post(
       await user.save();
       await sendEmail({ to: email, subject: 'Your PixelVault OTP', html: otpEmailHtml(otp, user.name, email) });
       res.json({ message: 'OTP sent' });
-    } catch (err) {
-      next(err);
-    }
+    } catch (err) { next(err); }
   }
 );
 
-// POST /auth/forgot-password — send OTP to email for password reset
+// POST /auth/forgot-password
 router.post(
   '/forgot-password',
   [body('email').isEmail().normalizeEmail()],
@@ -176,7 +176,6 @@ router.post(
       const { email } = req.body as { email: string };
       const user = await User.findOne({ email });
 
-      // Always respond success to prevent email enumeration
       if (!user) {
         res.json({ message: 'If that email is registered, a reset code was sent.' });
         return;
@@ -194,13 +193,11 @@ router.post(
       });
 
       res.json({ message: 'If that email is registered, a reset code was sent.' });
-    } catch (err) {
-      next(err);
-    }
+    } catch (err) { next(err); }
   }
 );
 
-// POST /auth/reset-password — verify OTP and set new password
+// POST /auth/reset-password
 router.post(
   '/reset-password',
   [
@@ -212,9 +209,7 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { email, otp, newPassword } = req.body as {
-        email: string;
-        otp: string;
-        newPassword: string;
+        email: string; otp: string; newPassword: string;
       };
 
       const user = await User.findOne({ email });
@@ -223,20 +218,18 @@ router.post(
         return;
       }
 
-      user.passwordHash = newPassword; // pre-save hook hashes it
+      user.passwordHash = newPassword;
       user.otp = undefined;
       user.otpExpiresAt = undefined;
-      user.refreshTokens = []; // invalidate all sessions
+      user.refreshTokens = [];
       await user.save();
 
       res.json({ message: 'Password reset successfully. Please log in.' });
-    } catch (err) {
-      next(err);
-    }
+    } catch (err) { next(err); }
   }
 );
 
-// PATCH /auth/change-password — change password while logged in
+// PATCH /auth/change-password
 router.patch(
   '/change-password',
   authenticate,
@@ -248,31 +241,23 @@ router.patch(
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       const { currentPassword, newPassword } = req.body as {
-        currentPassword: string;
-        newPassword: string;
+        currentPassword: string; newPassword: string;
       };
 
       const user = await User.findById(req.user!.userId);
       if (!user) { res.status(404).json({ error: 'User not found' }); return; }
 
       const match = await user.comparePassword(currentPassword);
-      if (!match) {
-        res.status(400).json({ error: 'Current password is incorrect' });
-        return;
-      }
-
+      if (!match) { res.status(400).json({ error: 'Current password is incorrect' }); return; }
       if (currentPassword === newPassword) {
-        res.status(400).json({ error: 'New password must differ from current password' });
+        res.status(400).json({ error: 'New password must differ from current' });
         return;
       }
 
       user.passwordHash = newPassword;
       await user.save();
-
       res.json({ message: 'Password changed successfully' });
-    } catch (err) {
-      next(err);
-    }
+    } catch (err) { next(err); }
   }
 );
 
@@ -287,8 +272,8 @@ router.post('/refresh', async (req: Request, res: Response, next: NextFunction) 
       res.status(401).json({ error: 'Invalid refresh token' });
       return;
     }
-    const newAccess = signAccessToken({ userId: String(user._id), email: user.email });
-    const newRefresh = signRefreshToken({ userId: String(user._id), email: user.email });
+    const newAccess = signAccessToken({ userId: String(user._id), email: user.email, role: user.role });
+    const newRefresh = signRefreshToken({ userId: String(user._id), email: user.email, role: user.role });
     user.refreshTokens = user.refreshTokens.filter((t) => t !== refreshToken);
     user.refreshTokens.push(newRefresh);
     await user.save();
@@ -308,9 +293,7 @@ router.post('/logout', authenticate, async (req: AuthRequest, res: Response, nex
       await user.save();
     }
     res.json({ message: 'Logged out' });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 });
 
 // GET /auth/me
@@ -319,19 +302,14 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response, next: Ne
     const user = await User.findById(req.user!.userId).select('-passwordHash -otp -otpExpiresAt -refreshTokens');
     if (!user) { res.status(404).json({ error: 'User not found' }); return; }
     res.json(user);
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 });
 
 // PATCH /auth/profile
 router.patch(
   '/profile',
   authenticate,
-  [
-    body('name').optional().trim().notEmpty(),
-    body('phone').optional().trim(),
-  ],
+  [body('name').optional().trim().notEmpty(), body('phone').optional().trim()],
   validate,
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
@@ -342,9 +320,7 @@ router.patch(
         { new: true }
       ).select('-passwordHash -otp -otpExpiresAt -refreshTokens');
       res.json(user);
-    } catch (err) {
-      next(err);
-    }
+    } catch (err) { next(err); }
   }
 );
 
