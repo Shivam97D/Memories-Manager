@@ -3,6 +3,10 @@ import { verifyAccessToken, TokenPayload } from '../utils/jwt';
 
 export interface AuthRequest extends Request {
   user?: TokenPayload;
+  // Re-declared explicitly so TypeScript sees them in all strict contexts
+  params: Record<string, string>;
+  query: Record<string, string | string[] | undefined>;
+  body: Record<string, unknown>;
 }
 
 export function authenticate(req: AuthRequest, res: Response, next: NextFunction): void {
