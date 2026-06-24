@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { InfoButton } from '@/components/ui/tooltip-info';
+import { SHARED_ALBUM_GUIDE } from '@/lib/setup-guides';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import toast from 'react-hot-toast';
@@ -54,6 +56,15 @@ export function AddSharedAlbumModal({ open, onClose, editAlbum }: Props) {
           <DialogTitle>{isEdit ? 'Edit Shared Album' : 'Add Shared Album'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Info banner */}
+          <div className="flex items-center justify-between p-3 bg-accent/50 rounded-lg border border-accent">
+            <div>
+              <p className="text-xs font-medium">📂 Shared Album</p>
+              <p className="text-xs text-muted-foreground">Works with Google Photos, iCloud, Dropbox, etc.</p>
+            </div>
+            <InfoButton guide={SHARED_ALBUM_GUIDE} />
+          </div>
+
           <Input label="Album Name *" placeholder="Family Summer 2024" value={form.name} onChange={set('name')} required />
           <Input label="Album Link *" placeholder="https://photos.google.com/share/..." value={form.link} onChange={set('link')} required />
           <Input label="Shared From (email)" type="email" placeholder="sender@gmail.com" value={form.sharedFromEmail} onChange={set('sharedFromEmail')} />
