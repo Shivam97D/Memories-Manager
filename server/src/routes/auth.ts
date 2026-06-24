@@ -54,15 +54,23 @@ router.post(
       const userCount = await User.countDocuments();
       const isAdmin = userCount === 0 || (env.ADMIN_EMAIL && email === env.ADMIN_EMAIL);
 
+      // Send email FIRST — only create the user if delivery succeeds.
+      // This prevents phantom accounts that can't be verified.
+      try {
+        await sendEmail({
+          to: email,
+          subject: 'Verify your PixelVault account',
+          html: otpEmailHtml(otp, name, email),
+        });
+      } catch (emailErr) {
+        const msg = emailErr instanceof Error ? emailErr.message : 'Failed to send verification email';
+        res.status(503).json({ error: `Could not send verification email: ${msg}. Please try again.` });
+        return;
+      }
+
       await User.create({
         name, email, phone, passwordHash: password, otp, otpExpiresAt,
         role: isAdmin ? 'admin' : 'user',
-      });
-
-      await sendEmail({
-        to: email,
-        subject: 'Verify your PixelVault account',
-        html: otpEmailHtml(otp, name, email),
       });
 
       res.status(201).json({ message: 'Registered. Check email for OTP.' });

@@ -6,15 +6,30 @@ interface EmailOptions {
   html: string;
 }
 
+const EMAIL_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Email delivery timed out. Please try again.')), ms)
+    ),
+  ]);
+}
+
 async function sendViaResend(opts: EmailOptions): Promise<void> {
   const { Resend } = await import('resend');
   const resend = new Resend(env.RESEND_API_KEY);
-  await resend.emails.send({
+  const result = await resend.emails.send({
     from: env.EMAIL_FROM,
     to: opts.to,
     subject: opts.subject,
     html: opts.html,
   });
+  // Resend SDK v3 returns { data, error } — never throws on API errors
+  if (result.error) {
+    throw new Error(result.error.message || 'Failed to send email via Resend');
+  }
 }
 
 async function sendViaSMTP(opts: EmailOptions): Promise<void> {
@@ -25,16 +40,16 @@ async function sendViaSMTP(opts: EmailOptions): Promise<void> {
     secure: env.SMTP_PORT === 465,
     auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
   });
-  await transporter.sendMail({ from: env.EMAIL_FROM, ...opts });
+  await transporter.sendMail({ from: `PixelVault <${env.EMAIL_FROM}>`, ...opts });
 }
 
 export async function sendEmail(opts: EmailOptions): Promise<void> {
-  // SMTP (Gmail / any) takes priority — works with any recipient
+  // SMTP (Gmail + App Password) takes priority — works with any recipient
   // Resend with onboarding@resend.dev only delivers to the Resend account owner's email
   if (env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS) {
-    await sendViaSMTP(opts);
+    await withTimeout(sendViaSMTP(opts), EMAIL_TIMEOUT_MS);
   } else if (env.RESEND_API_KEY) {
-    await sendViaResend(opts);
+    await withTimeout(sendViaResend(opts), EMAIL_TIMEOUT_MS);
   } else {
     console.log('\n📧 EMAIL (dev — no provider configured)');
     console.log(`To: ${opts.to} | Subject: ${opts.subject}`);

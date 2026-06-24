@@ -32,7 +32,11 @@ export function RegisterPage() {
       setStep('verify');
       toast.success('Check your email for the verification code');
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Registration failed';
+      const e = err as { code?: string; response?: { data?: { error?: string } } };
+      const msg =
+        e.code === 'ECONNABORTED'
+          ? 'Request timed out — server may be starting up. Please try again in a moment.'
+          : e.response?.data?.error || 'Registration failed. Please try again.';
       toast.error(msg);
     } finally {
       setLoading(false);
