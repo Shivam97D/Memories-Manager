@@ -1,5 +1,4 @@
 import { Router, Response, NextFunction } from 'express';
-import multer from 'multer';
 import { StorageAccount } from '../models/StorageAccount';
 import { ActivityLog } from '../models/ActivityLog';
 import { authenticate, AuthRequest } from '../middleware/auth';
@@ -8,7 +7,7 @@ import { createAdapter } from '../services/adapter.factory';
 const router = Router();
 router.use(authenticate);
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
+export const PIXELVAULT_ROOT = 'PixelVault_Memory_Manager';
 
 async function getOwnedAccount(accountId: string, userId: string) {
   const account = await StorageAccount.findOne({ _id: accountId, userId });
@@ -23,7 +22,29 @@ async function log(userId: string, accountId: string, action: string, path?: str
   await ActivityLog.create({ userId, storageAccountId: accountId, action, resourcePath: path });
 }
 
-// GET /storage/:accountId/browse?path=folder/path&cursor=...
+// GET /storage/:accountId/ensure-root
+// Called once when manager opens — creates the root folder if it doesn't exist
+router.get('/:accountId/ensure-root', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
+    const adapter = createAdapter(account.type, account.credentials);
+
+    const rootPath = account.type === 'IMAGEKIT'
+      ? `/${PIXELVAULT_ROOT}`
+      : PIXELVAULT_ROOT;
+
+    try {
+      await adapter.createFolder(rootPath);
+    } catch {
+      // folder already exists — fine
+    }
+
+    await log(req.user!.userId, req.params.accountId, 'INIT_ROOT', rootPath);
+    res.json({ path: rootPath });
+  } catch (err) { next(err); }
+});
+
+// GET /storage/:accountId/browse?path=...&cursor=...
 router.get('/:accountId/browse', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
@@ -36,19 +57,19 @@ router.get('/:accountId/browse', async (req: AuthRequest, res: Response, next: N
   } catch (err) { next(err); }
 });
 
-// GET /storage/:accountId/upload-params?folder=...
+// GET /storage/:accountId/upload-params?folder=...&fileName=...
 router.get('/:accountId/upload-params', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
     const adapter = createAdapter(account.type, account.credentials);
-    const folder = (req.query.folder as string) || '';
+    const folder = (req.query.folder as string) || PIXELVAULT_ROOT;
     const fileName = (req.query.fileName as string) || 'upload';
     const params = await adapter.getSignedUploadParams(folder, fileName);
     res.json(params);
   } catch (err) { next(err); }
 });
 
-// DELETE /storage/:accountId/resource
+// DELETE /storage/:accountId/resource — single delete
 router.delete('/:accountId/resource', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
@@ -60,7 +81,61 @@ router.delete('/:accountId/resource', async (req: AuthRequest, res: Response, ne
   } catch (err) { next(err); }
 });
 
-// GET /storage/:accountId/transform?publicId=...&w=...&h=...&crop=...
+// POST /storage/:accountId/bulk-delete — delete multiple files
+router.post('/:accountId/bulk-delete', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
+    const adapter = createAdapter(account.type, account.credentials);
+    const { publicIds, resourceType } = req.body as { publicIds: string[]; resourceType?: string };
+
+    if (!Array.isArray(publicIds) || publicIds.length === 0) {
+      res.status(400).json({ error: 'publicIds array required' });
+      return;
+    }
+
+    await Promise.all(publicIds.map((id) => adapter.deleteResource(id, resourceType)));
+    await log(req.user!.userId, req.params.accountId, 'BULK_DELETE', `${publicIds.length} items`);
+    res.json({ message: `Deleted ${publicIds.length} item(s)` });
+  } catch (err) { next(err); }
+});
+
+// POST /storage/:accountId/bulk-download — get signed URLs for multiple files
+router.post('/:accountId/bulk-download', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
+    const adapter = createAdapter(account.type, account.credentials);
+    const { publicIds } = req.body as { publicIds: string[] };
+
+    if (!Array.isArray(publicIds) || publicIds.length === 0) {
+      res.status(400).json({ error: 'publicIds array required' });
+      return;
+    }
+
+    const urls = await Promise.all(publicIds.map((id) => adapter.getSignedDownloadUrl(id)));
+    await log(req.user!.userId, req.params.accountId, 'BULK_DOWNLOAD', `${publicIds.length} items`);
+    res.json({ urls });
+  } catch (err) { next(err); }
+});
+
+// PATCH /storage/:accountId/resource/rename
+router.patch('/:accountId/resource/rename', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
+    const adapter = createAdapter(account.type, account.credentials);
+    const { fromPath, toPath } = req.body as { fromPath: string; toPath: string };
+
+    if (!fromPath || !toPath) {
+      res.status(400).json({ error: 'fromPath and toPath required' });
+      return;
+    }
+
+    await adapter.renameResource(fromPath, toPath);
+    await log(req.user!.userId, req.params.accountId, 'RENAME', `${fromPath} → ${toPath}`);
+    res.json({ message: 'Renamed' });
+  } catch (err) { next(err); }
+});
+
+// GET /storage/:accountId/transform?publicId=...
 router.get('/:accountId/transform', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
