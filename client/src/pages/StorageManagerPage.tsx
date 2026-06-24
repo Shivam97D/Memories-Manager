@@ -3,20 +3,21 @@ import { useParams, useSearchParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, FolderPlus, Upload as UploadIcon, RefreshCw,
-  Trash2, Download, Share2, CheckSquare, Square, X, Pencil,
-  Loader2,
+  Trash2, Download, Share2, X, Pencil,
+  Loader2, Copy, HardDrive, CheckSquare, Square,
 } from 'lucide-react';
 import { api } from '@/lib/api';
-import { MediaItem, FolderContents, Permission, ResourceType } from '@/types';
+import { MediaItem, FolderContents, Permission, ResourceType, StorageUsage } from '@/types';
 import { FileCard } from '@/components/manager/FileCard';
 import { BreadcrumbNav } from '@/components/manager/BreadcrumbNav';
 import { UploadZone } from '@/components/manager/UploadZone';
 import { FilePreview } from '@/components/manager/FilePreview';
 import { ShareResourceModal } from '@/components/modals/ShareResourceModal';
+import { FolderPickerDialog } from '@/components/modals/FolderPickerDialog';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
+import { cn, formatBytes } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
 const PIXELVAULT_ROOT = 'PixelVault_Memory_Manager';
@@ -33,12 +34,10 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
   const accountType = (searchParams.get('type') || 'cloudinary').toUpperCase();
   const qc = useQueryClient();
 
-  // Resolved root — for shared views it's the share root; for owned accounts we call ensure-root
   const [rootPath, setRootPath] = useState<string | null>(sharedRootPath ?? null);
   const [rootReady, setRootReady] = useState(!!sharedRootPath);
   const [currentPath, setCurrentPath] = useState<string>(sharedRootPath || '');
 
-  // UI state
   const [previewItem, setPreviewItem] = useState<MediaItem | null>(null);
   const [shareItem, setShareItem] = useState<MediaItem | null>(null);
   const [showUpload, setShowUpload] = useState(false);
@@ -47,25 +46,17 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
   const [renameValue, setRenameValue] = useState('');
   const [bulkActing, setBulkActing] = useState(false);
   const [isSelecting, setIsSelecting] = useState(false);
+  const [copyDialogOpen, setCopyDialogOpen] = useState(false);
 
   const permissions: Permission[] = sharePerm || ['VIEW', 'DOWNLOAD', 'EDIT', 'DELETE'];
   const selectionMode = isSelecting || selectedIds.size > 0;
 
-  // Step 1: ensure root folder exists (only for owned accounts)
+  // Ensure root folder on mount
   useEffect(() => {
     if (shareId || !accountId) return;
     api.get(`/storage/${accountId}/ensure-root`)
-      .then(({ data }) => {
-        setRootPath(data.path);
-        setCurrentPath(data.path);
-        setRootReady(true);
-      })
-      .catch(() => {
-        // fallback — just open root without locking
-        setRootPath('');
-        setCurrentPath('');
-        setRootReady(true);
-      });
+      .then(({ data }) => { setRootPath(data.path); setCurrentPath(data.path); setRootReady(true); })
+      .catch(() => { setRootPath(''); setCurrentPath(''); setRootReady(true); });
   }, [accountId, shareId]);
 
   // Browse query
@@ -79,20 +70,27 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
     enabled: rootReady && !!(accountId || shareId),
   });
 
+  // Storage usage (lazy — fetched once when manager opens, for owned accounts)
+  const { data: usage } = useQuery<StorageUsage>({
+    queryKey: ['storage-usage', accountId],
+    queryFn: () => api.get(`/storage/${accountId}/usage`).then((r) => r.data),
+    enabled: rootReady && !!accountId && !shareId,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+
   const items = data?.items || [];
   const fileItems = items.filter((i) => i.type === 'file');
   const selectedItems = fileItems.filter((i) => selectedIds.has(i.id));
 
-  // Navigate — guard against leaving the root folder for owned accounts
   const navigate = useCallback((path: string) => {
     const root = rootPath ?? '';
-    if (!shareId && root && !path.startsWith(root)) return; // prevent escaping root
+    if (!shareId && root && !path.startsWith(root)) return;
     setCurrentPath(path);
     setSelectedIds(new Set());
     setIsSelecting(false);
   }, [rootPath, shareId]);
 
-  // Load more
   const loadMore = async () => {
     if (!data?.nextCursor) return;
     const res = await api.get(browseUrl + `&cursor=${data.nextCursor}`);
@@ -126,6 +124,7 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
       const publicIds = selectedItems.map((i) => i.publicId || i.id);
       await api.post(`/storage/${accountId}/bulk-delete`, { publicIds });
       setSelectedIds(new Set());
+      setIsSelecting(false);
       refetch();
       toast.success(`Deleted ${selectedItems.length} item(s)`);
     } catch {
@@ -148,7 +147,7 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
     }
   };
 
-  // Bulk download — open each URL with a small delay to avoid popup blockers
+  // Bulk download
   const handleBulkDownload = async () => {
     if (selectedItems.length === 0) return;
     setBulkActing(true);
@@ -166,9 +165,24 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
     }
   };
 
-  // Select toggle
+  // Bulk copy
+  const handleBulkCopy = async (destFolder: string) => {
+    if (selectedItems.length === 0) return;
+    setBulkActing(true);
+    try {
+      const copyItems = selectedItems.map((i) => ({ publicId: i.publicId || i.id, path: i.path }));
+      await api.post(`/storage/${accountId}/bulk-copy`, { items: copyItems, destFolder });
+      toast.success(`Copied ${selectedItems.length} file(s) to ${destFolder.split('/').pop()}`);
+      if (destFolder === currentPath) refetch();
+    } catch {
+      toast.error('Copy failed');
+    } finally {
+      setBulkActing(false);
+    }
+  };
+
   const toggleSelect = (item: MediaItem) => {
-    if (item.type === 'folder') return; // can't select folders
+    if (item.type === 'folder') return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       next.has(item.id) ? next.delete(item.id) : next.add(item.id);
@@ -188,17 +202,11 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
       await api.post(`/storage/${accountId}/folder`, { path });
       refetch();
       toast.success('Folder created');
-    } catch {
-      toast.error('Failed to create folder');
-    }
+    } catch { toast.error('Failed to create folder'); }
   };
 
   // Rename
-  const openRename = (item: MediaItem) => {
-    setRenameItem(item);
-    setRenameValue(item.name);
-  };
-
+  const openRename = (item: MediaItem) => { setRenameItem(item); setRenameValue(item.name); };
   const handleRename = async () => {
     if (!renameItem || !renameValue.trim() || renameValue.trim() === renameItem.name) {
       setRenameItem(null);
@@ -206,7 +214,6 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
     }
     try {
       const fromPath = renameItem.publicId || renameItem.path;
-      // Build toPath: same parent folder, new name (strip extension for Cloudinary publicId)
       const parts = fromPath.split('/');
       parts[parts.length - 1] = renameValue.trim();
       const toPath = parts.join('/');
@@ -214,16 +221,17 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
       setRenameItem(null);
       refetch();
       toast.success('Renamed');
-    } catch {
-      toast.error('Rename failed');
-    }
+    } catch { toast.error('Rename failed'); }
   };
 
-  // Open item
   const handleOpen = (item: MediaItem) => {
     if (item.type === 'folder') navigate(item.path);
     else setPreviewItem(item);
   };
+
+  // Storage usage formatting
+  const usagePct = usage ? Math.min(100, (usage.usedBytes / usage.totalBytes) * 100) : 0;
+  const usageColor = usagePct > 90 ? 'bg-red-500' : usagePct > 70 ? 'bg-amber-500' : 'bg-primary';
 
   if (!rootReady) {
     return (
@@ -235,7 +243,7 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-24">
       {/* Back link */}
       {!shareId && (
         <Link
@@ -246,16 +254,39 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
         </Link>
       )}
 
-      {/* Root notice */}
+      {/* Root notice + Storage usage */}
       {!shareId && (
-        <div className="flex items-center gap-2 bg-accent/40 border border-primary/20 rounded-lg px-3 py-2 text-xs text-muted-foreground">
-          <span className="text-primary font-medium">Root:</span>
-          <span className="font-mono">{rootPath}</span>
-          <span className="text-muted-foreground">— Memory Manager · contact: +91 8446992405</span>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+          <div className="flex items-center gap-2 bg-accent/40 border border-primary/20 rounded-lg px-3 py-2 text-xs text-muted-foreground flex-1 min-w-0">
+            <span className="text-primary font-medium flex-shrink-0">Root:</span>
+            <span className="font-mono truncate">{rootPath}</span>
+          </div>
+
+          {/* Storage usage widget */}
+          {usage && (
+            <div className="flex items-center gap-2 bg-card border border-border rounded-lg px-3 py-2 text-xs flex-shrink-0 min-w-[200px]">
+              <HardDrive className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-1 gap-2">
+                  <span className="text-muted-foreground truncate">{formatBytes(usage.usedBytes)}</span>
+                  <span className="text-muted-foreground flex-shrink-0">/ {formatBytes(usage.totalBytes)}</span>
+                </div>
+                <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+                  <div
+                    className={cn('h-full rounded-full transition-all', usageColor)}
+                    style={{ width: `${usagePct}%` }}
+                  />
+                </div>
+              </div>
+              <span className={cn('text-[10px] font-medium flex-shrink-0', usagePct > 90 ? 'text-red-500' : 'text-muted-foreground')}>
+                {usagePct.toFixed(0)}%
+              </span>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Breadcrumb + action buttons */}
+      {/* Breadcrumb + toolbar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <BreadcrumbNav
           path={currentPath}
@@ -263,51 +294,45 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
           onNavigate={navigate}
         />
 
-        {/* Selection mode actions */}
-        {selectionMode ? (
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-muted-foreground">{selectedItems.length} selected</span>
-            <Button variant="outline" size="sm" onClick={selectAll} disabled={selectedItems.length === fileItems.length}>
-              <CheckSquare className="h-3.5 w-3.5" /> All
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="h-3.5 w-3.5" />
+          </Button>
+
+          {fileItems.length > 0 && !selectionMode && (
+            <Button variant="outline" size="sm" onClick={() => setIsSelecting(true)}>
+              <Square className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Select</span>
             </Button>
-            <Button variant="outline" size="sm" onClick={clearSelection}>
-              <X className="h-3.5 w-3.5" /> Clear
+          )}
+
+          {selectionMode && (
+            <>
+              <Button variant="outline" size="sm" onClick={selectAll} disabled={selectedItems.length === fileItems.length}>
+                <CheckSquare className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">All</span>
+              </Button>
+              <Button variant="ghost" size="sm" onClick={clearSelection}>
+                <X className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Cancel</span>
+              </Button>
+            </>
+          )}
+
+          {permissions.includes('EDIT') && !shareId && !selectionMode && (
+            <Button variant="outline" size="sm" onClick={handleCreateFolder}>
+              <FolderPlus className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">New Folder</span>
             </Button>
-            {permissions.includes('DOWNLOAD') && (
-              <Button size="sm" onClick={handleBulkDownload} loading={bulkActing}>
-                <Download className="h-3.5 w-3.5" /> Download ({selectedItems.length})
-              </Button>
-            )}
-            {permissions.includes('DELETE') && (
-              <Button variant="destructive" size="sm" onClick={handleBulkDelete} loading={bulkActing}>
-                <Trash2 className="h-3.5 w-3.5" /> Delete ({selectedItems.length})
-              </Button>
-            )}
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 flex-wrap">
-            <Button variant="outline" size="sm" onClick={() => refetch()}>
-              <RefreshCw className="h-3.5 w-3.5" />
+          )}
+
+          {permissions.includes('EDIT') && !selectionMode && (
+            <Button size="sm" onClick={() => setShowUpload((v) => !v)}>
+              <UploadIcon className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Upload</span>
             </Button>
-            {fileItems.length > 0 && (
-              <Button variant="outline" size="sm" onClick={() => setIsSelecting(true)}>
-                <Square className="h-3.5 w-3.5" /> Select
-              </Button>
-            )}
-            {permissions.includes('EDIT') && !shareId && (
-              <Button variant="outline" size="sm" onClick={handleCreateFolder}>
-                <FolderPlus className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">New Folder</span>
-              </Button>
-            )}
-            {permissions.includes('EDIT') && (
-              <Button size="sm" onClick={() => setShowUpload((v) => !v)}>
-                <UploadIcon className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Upload</span>
-              </Button>
-            )}
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Upload zone */}
@@ -349,10 +374,7 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
               {data?.totalCount && data.totalCount > items.length && ` of ${data.totalCount}`}
             </p>
             {fileItems.length > 0 && !selectionMode && (
-              <button
-                className="text-xs text-primary hover:underline"
-                onClick={() => setIsSelecting(true)}
-              >
+              <button className="text-xs text-primary hover:underline" onClick={() => setIsSelecting(true)}>
                 Select items
               </button>
             )}
@@ -386,6 +408,65 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
         </>
       )}
 
+      {/* ── Floating bulk action bar ── */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-16 md:bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 bg-card border border-border shadow-2xl rounded-2xl px-3 py-2.5 animate-in slide-in-from-bottom-3 duration-200">
+          <span className="text-xs font-semibold text-muted-foreground pr-2 border-r border-border mr-1">
+            {selectedIds.size} selected
+          </span>
+
+          {permissions.includes('DOWNLOAD') && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 gap-1.5 text-xs"
+              onClick={handleBulkDownload}
+              disabled={bulkActing}
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Download</span>
+            </Button>
+          )}
+
+          {permissions.includes('EDIT') && !shareId && accountId && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => setCopyDialogOpen(true)}
+              disabled={bulkActing}
+            >
+              <Copy className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Copy to…</span>
+            </Button>
+          )}
+
+          {permissions.includes('DELETE') && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 gap-1.5 text-xs text-red-500 hover:text-red-600 hover:bg-red-50"
+              onClick={handleBulkDelete}
+              disabled={bulkActing}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Delete</span>
+            </Button>
+          )}
+
+          <div className="w-px h-4 bg-border mx-1" />
+
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 w-8 p-0"
+            onClick={clearSelection}
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
+
       {/* File preview lightbox */}
       <FilePreview
         item={previewItem}
@@ -406,6 +487,19 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
           resourcePath={shareItem.path}
           resourceType={shareItem.type === 'folder' ? 'FOLDER' : 'FILE'}
           resourceName={shareItem.name}
+        />
+      )}
+
+      {/* Copy-to folder picker */}
+      {accountId && rootPath !== null && (
+        <FolderPickerDialog
+          open={copyDialogOpen}
+          onClose={() => setCopyDialogOpen(false)}
+          onSelect={handleBulkCopy}
+          accountId={accountId}
+          rootPath={rootPath}
+          title={`Copy ${selectedItems.length} file${selectedItems.length !== 1 ? 's' : ''} to…`}
+          actionLabel="Copy here"
         />
       )}
 

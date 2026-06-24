@@ -149,4 +149,11 @@ export class CloudinaryService implements StorageAdapter {
   async renameResource(fromPath: string, toPath: string): Promise<void> {
     await this.cld.uploader.rename(fromPath, toPath);
   }
+
+  async copyResource(publicId: string, destFolder: string): Promise<void> {
+    const sourceUrl = this.cld.url(publicId, { secure: true });
+    const filename = publicId.split('/').pop()!;
+    const destPublicId = [destFolder, filename].filter(Boolean).join('/');
+    await this.cld.uploader.upload(sourceUrl, { public_id: destPublicId });
+  }
 }

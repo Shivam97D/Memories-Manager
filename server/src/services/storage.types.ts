@@ -51,4 +51,5 @@ export interface StorageAdapter {
   getUsage(): Promise<StorageUsage>;
   createFolder(path: string): Promise<void>;
   renameResource(fromPath: string, toPath: string): Promise<void>;
+  copyResource(source: string, destFolder: string): Promise<void>;
 }

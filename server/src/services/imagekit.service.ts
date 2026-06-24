@@ -138,4 +138,11 @@ export class ImageKitService implements StorageAdapter {
   async renameResource(filePath: string, newFileName: string): Promise<void> {
     await this.ik.renameFile({ filePath, newFileName, purgeCache: false });
   }
+
+  async copyResource(filePath: string, destFolder: string): Promise<void> {
+    const filename = filePath.split('/').filter(Boolean).pop()!;
+    const destinationPath = `${destFolder}/${filename}`;
+    await (this.ik as unknown as { copyFile: (o: object) => Promise<void> })
+      .copyFile({ sourceFilePath: filePath, destinationPath });
+  }
 }

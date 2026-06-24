@@ -176,6 +176,44 @@ router.post('/:accountId/folder', async (req: AuthRequest, res: Response, next: 
   } catch (err) { next(err); }
 });
 
+// GET /storage/:accountId/usage
+router.get('/:accountId/usage', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
+    const adapter = createAdapter(account.type, account.credentials);
+    const usage = await adapter.getUsage();
+    res.json(usage);
+  } catch (err) { next(err); }
+});
+
+// POST /storage/:accountId/bulk-copy
+router.post('/:accountId/bulk-copy', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
+    const adapter = createAdapter(account.type, account.credentials);
+    const { items, destFolder } = req.body as {
+      items: { publicId: string; path: string }[];
+      destFolder: string;
+    };
+
+    if (!Array.isArray(items) || items.length === 0 || !destFolder) {
+      res.status(400).json({ error: 'items[] and destFolder are required' });
+      return;
+    }
+
+    // ImageKit uses file path; Cloudinary uses publicId
+    await Promise.all(
+      items.map((item) => {
+        const source = account.type === 'IMAGEKIT' ? item.path : item.publicId;
+        return adapter.copyResource(source, destFolder);
+      })
+    );
+
+    await log(req.user!.userId, req.params.accountId, 'BULK_COPY', `${items.length} items → ${destFolder}`);
+    res.json({ message: `Copied ${items.length} item(s) to ${destFolder}` });
+  } catch (err) { next(err); }
+});
+
 // GET /storage/:accountId/activity
 router.get('/:accountId/activity', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
