@@ -18,10 +18,27 @@ import { errorHandler, notFound } from './middleware/errorHandler';
 const app = express();
 
 app.use(helmet());
-app.use(cors({
-  origin: [env.CLIENT_URL, 'http://localhost:5173', 'http://localhost:3000'],
-  credentials: true,
-}));
+
+// Build allowed origins from CLIENT_URL env var (supports comma-separated list)
+const allowedOrigins = [
+  ...env.CLIENT_URL.split(',').map((o) => o.trim()).filter(Boolean),
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, curl, Render health checks)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      callback(new Error(`CORS: origin ${origin} not allowed`));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
 app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
