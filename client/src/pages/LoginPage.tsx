@@ -56,15 +56,25 @@ export function LoginPage() {
             icon={<Mail className="h-4 w-4" />}
             required
           />
-          <Input
-            label="Password"
-            type="password"
-            placeholder="••••••••"
-            value={form.password}
-            onChange={set('password')}
-            icon={<Lock className="h-4 w-4" />}
-            required
-          />
+          <div className="space-y-1">
+            <Input
+              label="Password"
+              type="password"
+              placeholder="••••••••"
+              value={form.password}
+              onChange={set('password')}
+              icon={<Lock className="h-4 w-4" />}
+              required
+            />
+            <div className="flex justify-end">
+              <Link
+                to="/forgot-password"
+                className="text-xs text-primary hover:underline"
+              >
+                Forgot password?
+              </Link>
+            </div>
+          </div>
           <Button type="submit" className="w-full" loading={loading}>
             Sign In
           </Button>

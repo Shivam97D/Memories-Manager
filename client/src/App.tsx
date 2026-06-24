@@ -6,6 +6,7 @@ import { Layout } from '@/components/layout/Layout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { LoginPage } from '@/pages/LoginPage';
 import { RegisterPage } from '@/pages/RegisterPage';
+import { ForgotPasswordPage } from '@/pages/ForgotPasswordPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { StorageManagerPage } from '@/pages/StorageManagerPage';
 import { SharedManagerPage } from '@/pages/SharedManagerPage';
@@ -30,6 +31,7 @@ export default function App() {
           {/* Public */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
           {/* Protected */}
           <Route

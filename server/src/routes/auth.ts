@@ -3,7 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { User } from '../models/User';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { generateOTP } from '../utils/otp';
-import { sendEmail, otpEmailHtml } from '../utils/email';
+import { sendEmail, otpEmailHtml, resetPasswordEmailHtml } from '../utils/email';
 import { env } from '../config/env';
 import { authenticate, AuthRequest } from '../middleware/auth';
 
@@ -160,6 +160,116 @@ router.post(
       await user.save();
       await sendEmail({ to: email, subject: 'Your PixelVault OTP', html: otpEmailHtml(otp, user.name, email) });
       res.json({ message: 'OTP sent' });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /auth/forgot-password — send OTP to email for password reset
+router.post(
+  '/forgot-password',
+  [body('email').isEmail().normalizeEmail()],
+  validate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email } = req.body as { email: string };
+      const user = await User.findOne({ email });
+
+      // Always respond success to prevent email enumeration
+      if (!user) {
+        res.json({ message: 'If that email is registered, a reset code was sent.' });
+        return;
+      }
+
+      const otp = generateOTP();
+      user.otp = otp;
+      user.otpExpiresAt = new Date(Date.now() + env.OTP_EXPIRES_MINUTES * 60 * 1000);
+      await user.save();
+
+      await sendEmail({
+        to: email,
+        subject: 'Reset your PixelVault password',
+        html: resetPasswordEmailHtml(otp, user.name, email),
+      });
+
+      res.json({ message: 'If that email is registered, a reset code was sent.' });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// POST /auth/reset-password — verify OTP and set new password
+router.post(
+  '/reset-password',
+  [
+    body('email').isEmail().normalizeEmail(),
+    body('otp').isLength({ min: 6, max: 6 }),
+    body('newPassword').isLength({ min: 8 }).withMessage('Password min 8 chars'),
+  ],
+  validate,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email, otp, newPassword } = req.body as {
+        email: string;
+        otp: string;
+        newPassword: string;
+      };
+
+      const user = await User.findOne({ email });
+      if (!user || user.otp !== otp || !user.otpExpiresAt || user.otpExpiresAt < new Date()) {
+        res.status(400).json({ error: 'Invalid or expired reset code' });
+        return;
+      }
+
+      user.passwordHash = newPassword; // pre-save hook hashes it
+      user.otp = undefined;
+      user.otpExpiresAt = undefined;
+      user.refreshTokens = []; // invalidate all sessions
+      await user.save();
+
+      res.json({ message: 'Password reset successfully. Please log in.' });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// PATCH /auth/change-password — change password while logged in
+router.patch(
+  '/change-password',
+  authenticate,
+  [
+    body('currentPassword').notEmpty().withMessage('Current password required'),
+    body('newPassword').isLength({ min: 8 }).withMessage('New password min 8 chars'),
+  ],
+  validate,
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const { currentPassword, newPassword } = req.body as {
+        currentPassword: string;
+        newPassword: string;
+      };
+
+      const user = await User.findById(req.user!.userId);
+      if (!user) { res.status(404).json({ error: 'User not found' }); return; }
+
+      const match = await user.comparePassword(currentPassword);
+      if (!match) {
+        res.status(400).json({ error: 'Current password is incorrect' });
+        return;
+      }
+
+      if (currentPassword === newPassword) {
+        res.status(400).json({ error: 'New password must differ from current password' });
+        return;
+      }
+
+      user.passwordHash = newPassword;
+      await user.save();
+
+      res.json({ message: 'Password changed successfully' });
     } catch (err) {
       next(err);
     }
