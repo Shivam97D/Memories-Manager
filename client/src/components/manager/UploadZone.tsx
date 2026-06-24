@@ -41,12 +41,10 @@ export function UploadZone({ accountId, accountType, currentPath, shareId, onUpl
     maxSize: 100 * 1024 * 1024,
   });
 
-  const uploadFile = async (index: number) => {
-    const entry = files[index];
+  const uploadFile = async (index: number, entry: UploadFile): Promise<boolean> => {
     setFiles((prev) => prev.map((f, i) => i === index ? { ...f, status: 'uploading' } : f));
 
     try {
-      // Get signed params from our server
       const paramsUrl = shareId
         ? `/proxy/${shareId}/upload-params?folder=${encodeURIComponent(currentPath)}&fileName=${encodeURIComponent(entry.file.name)}`
         : `/storage/${accountId}/upload-params?folder=${encodeURIComponent(currentPath)}&fileName=${encodeURIComponent(entry.file.name)}`;
@@ -56,15 +54,22 @@ export function UploadZone({ accountId, accountType, currentPath, shareId, onUpl
       if (accountType === 'CLOUDINARY') {
         const formData = new FormData();
         formData.append('file', entry.file);
-        Object.entries(params).forEach(([k, v]) => formData.append(k, v as string));
+        // Append only the fields included in the signature (timestamp, folder, api_key)
+        // plus cloud_name for routing — do NOT append extra params not in the signature
+        formData.append('signature', params.signature);
+        formData.append('timestamp', params.timestamp);
+        formData.append('folder', params.folder);
+        formData.append('api_key', params.api_key);
 
         await axios.post(
           `https://api.cloudinary.com/v1_1/${params.cloud_name}/auto/upload`,
           formData,
-          { onUploadProgress: (e) => {
-            const pct = Math.round((e.loaded / (e.total || 1)) * 100);
-            setFiles((prev) => prev.map((f, i) => i === index ? { ...f, progress: pct } : f));
-          }}
+          {
+            onUploadProgress: (e) => {
+              const pct = Math.round((e.loaded / (e.total || 1)) * 100);
+              setFiles((prev) => prev.map((f, i) => i === index ? { ...f, progress: pct } : f));
+            },
+          }
         );
       } else if (accountType === 'IMAGEKIT') {
         const formData = new FormData();
@@ -85,20 +90,31 @@ export function UploadZone({ accountId, accountType, currentPath, shareId, onUpl
       }
 
       setFiles((prev) => prev.map((f, i) => i === index ? { ...f, status: 'done', progress: 100 } : f));
+      return true;
     } catch (err) {
-      setFiles((prev) => prev.map((f, i) => i === index ? { ...f, status: 'error', error: 'Upload failed' } : f));
+      const msg = (err as { response?: { data?: { error?: { message?: string } } } })
+        ?.response?.data?.error?.message || 'Upload failed';
+      setFiles((prev) => prev.map((f, i) => i === index ? { ...f, status: 'error', error: msg } : f));
+      return false;
     }
   };
 
   const handleUploadAll = async () => {
     const pending = files.map((f, i) => ({ ...f, index: i })).filter((f) => f.status === 'pending');
-    await Promise.all(pending.map((f) => uploadFile(f.index)));
-    const allDone = files.every((f) => f.status === 'done' || f.status === 'error');
-    if (allDone) {
-      const successes = files.filter((f) => f.status === 'done').length;
-      toast.success(`${successes} file(s) uploaded`);
+    // Use returned booleans — never read stale `files` state after async work
+    const results = await Promise.all(pending.map((f) => uploadFile(f.index, f)));
+    const successes = results.filter(Boolean).length;
+    const total = pending.length;
+
+    if (successes === total) {
+      toast.success(`${successes} file${successes !== 1 ? 's' : ''} uploaded`);
       onUploadComplete?.();
-      setTimeout(() => { setFiles([]); setIsOpen(false); }, 1500);
+      setTimeout(() => { setFiles([]); setIsOpen(false); }, 1200);
+    } else if (successes > 0) {
+      toast.success(`${successes} of ${total} files uploaded`);
+      onUploadComplete?.();
+    } else {
+      toast.error('All uploads failed — check your account credentials');
     }
   };
 

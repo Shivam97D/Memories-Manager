@@ -1,4 +1,4 @@
-import { v2 as cloudinary, UploadApiOptions } from 'cloudinary';
+import { v2 as cloudinary } from 'cloudinary';
 import {
   StorageAdapter,
   FolderContents,
@@ -91,13 +91,11 @@ export class CloudinaryService implements StorageAdapter {
 
   async getSignedUploadParams(folder: string, _fileName: string): Promise<Record<string, string>> {
     const timestamp = Math.round(Date.now() / 1000);
-    const params: UploadApiOptions & { timestamp: number } = {
-      timestamp,
-      folder,
-      overwrite: false,
-    };
+    // Only include params that will ALSO be sent in the form data — any mismatch
+    // between signed params and sent params causes Cloudinary to reject the upload.
+    const sigParams = { timestamp, folder };
     const signature = this.cld.utils.api_sign_request(
-      params as Record<string, unknown>,
+      sigParams,
       this.cld.config().api_secret as string
     );
     return {
