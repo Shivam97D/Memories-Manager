@@ -328,14 +328,14 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
           {permissions.includes('EDIT') && !shareId && !selectionMode && (
             <Button variant="outline" size="sm" onClick={() => { setNewFolderName(''); setCreateFolderOpen(true); }}>
               <FolderPlus className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">New Folder</span>
+              New Folder
             </Button>
           )}
 
           {permissions.includes('EDIT') && !selectionMode && (
             <Button size="sm" onClick={() => setShowUpload((v) => !v)}>
               <UploadIcon className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Upload</span>
+              Upload
             </Button>
           )}
         </div>
