@@ -335,10 +335,10 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
         </div>
       </div>
 
-      {/* Upload zone */}
-      {showUpload && accountId && (
+      {/* Upload zone — works for both owned (accountId) and shared (shareId) views */}
+      {showUpload && (accountId || shareId) && (
         <UploadZone
-          accountId={accountId}
+          accountId={accountId ?? ''}
           accountType={accountType}
           currentPath={currentPath}
           shareId={shareId}

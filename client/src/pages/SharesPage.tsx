@@ -111,15 +111,23 @@ export function SharesPage() {
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">{shares.length} shared resource{shares.length !== 1 && 's'}</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {shares.map((share) => (
+        {shares.map((share) => {
+          const acc = share.storageAccountId as StorageAccount;
+          return (
           <ShareCard
             key={share._id}
             share={share}
             onOpen={() =>
-              navigate(`/shared-manager/${share._id}?permissions=${share.permissions.join(',')}&path=${share.resourcePath}`)
+              navigate(
+                `/shared-manager/${share._id}` +
+                `?permissions=${share.permissions.join(',')}` +
+                `&path=${encodeURIComponent(share.resourcePath)}` +
+                `&type=${acc.type}`
+              )
             }
           />
-        ))}
+        );
+        })}
       </div>
     </div>
   );
