@@ -35,6 +35,8 @@ interface InviteDoc {
   isActive: boolean;
   acceptedBy: string[];
   createdAt: string;
+  resourcePath: string;
+  storageAccountId: string;
 }
 
 function PermissionPicker({
@@ -95,19 +97,15 @@ export function ShareResourceModal({
   // Load existing invite links for this resource
   const { data: invites = [], refetch: refetchInvites } = useQuery<InviteDoc[]>({
     queryKey: ['invites', storageAccountId, resourcePath],
-    queryFn: () =>
-      api.get('/invites')
-        .then((r) => (r.data as InviteDoc[]).filter(
-          (i) => i.isActive && i.permissions.length > 0 &&
-            // We can't filter by resourcePath server-side easily, so filter client-side
-            true
-        )),
+    queryFn: () => api.get('/invites').then((r) => r.data as InviteDoc[]),
     enabled: open && tab === 'link',
     staleTime: 10_000,
   });
 
-  // Filter invites to this resource
-  const resourceInvites = invites.filter((_) => true); // server returns all; we'll show all active
+  // Filter invites to only this specific resource
+  const resourceInvites = invites.filter(
+    (i) => i.isActive && i.resourcePath === resourcePath && i.storageAccountId === storageAccountId
+  );
 
   // Email share mutation
   const emailMut = useMutation({

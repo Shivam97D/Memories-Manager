@@ -47,6 +47,8 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
   const [bulkActing, setBulkActing] = useState(false);
   const [isSelecting, setIsSelecting] = useState(false);
   const [copyDialogOpen, setCopyDialogOpen] = useState(false);
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
 
   const permissions: Permission[] = sharePerm || ['VIEW', 'DOWNLOAD', 'EDIT', 'DELETE'];
   const selectionMode = isSelecting || selectedIds.size > 0;
@@ -122,7 +124,8 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
     setBulkActing(true);
     try {
       const publicIds = selectedItems.map((i) => i.publicId || i.id);
-      await api.post(`/storage/${accountId}/bulk-delete`, { publicIds });
+      const delUrl = shareId ? `/proxy/${shareId}/bulk-delete` : `/storage/${accountId}/bulk-delete`;
+      await api.post(delUrl, { publicIds });
       setSelectedIds(new Set());
       setIsSelecting(false);
       refetch();
@@ -153,7 +156,8 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
     setBulkActing(true);
     try {
       const publicIds = selectedItems.map((i) => i.publicId || i.id);
-      const { data } = await api.post(`/storage/${accountId}/bulk-download`, { publicIds });
+      const dlUrl = shareId ? `/proxy/${shareId}/bulk-download` : `/storage/${accountId}/bulk-download`;
+      const { data } = await api.post(dlUrl, { publicIds });
       (data.urls as string[]).forEach((url, i) => {
         setTimeout(() => window.open(url, '_blank'), i * 300);
       });
@@ -195,11 +199,13 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
 
   // Create folder
   const handleCreateFolder = async () => {
-    const name = prompt('Folder name:');
-    if (!name?.trim()) return;
-    const path = currentPath ? `${currentPath}/${name.trim()}` : name.trim();
+    const name = newFolderName.trim();
+    if (!name) return;
+    const path = currentPath ? `${currentPath}/${name}` : name;
     try {
       await api.post(`/storage/${accountId}/folder`, { path });
+      setCreateFolderOpen(false);
+      setNewFolderName('');
       refetch();
       toast.success('Folder created');
     } catch { toast.error('Failed to create folder'); }
@@ -213,7 +219,7 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
       return;
     }
     try {
-      const fromPath = renameItem.publicId || renameItem.path;
+      const fromPath = renameItem.path;
       const parts = fromPath.split('/');
       parts[parts.length - 1] = renameValue.trim();
       const toPath = parts.join('/');
@@ -320,7 +326,7 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
           )}
 
           {permissions.includes('EDIT') && !shareId && !selectionMode && (
-            <Button variant="outline" size="sm" onClick={handleCreateFolder}>
+            <Button variant="outline" size="sm" onClick={() => { setNewFolderName(''); setCreateFolderOpen(true); }}>
               <FolderPlus className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">New Folder</span>
             </Button>
@@ -502,6 +508,37 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
           actionLabel="Copy here"
         />
       )}
+
+      {/* Create Folder dialog */}
+      <Dialog open={createFolderOpen} onOpenChange={(open) => { if (!open) { setCreateFolderOpen(false); setNewFolderName(''); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FolderPlus className="h-4 w-4" /> New Folder
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            {currentPath && (
+              <p className="text-xs text-muted-foreground">
+                Inside: <span className="font-mono bg-secondary px-1.5 py-0.5 rounded">{currentPath.split('/').pop()}</span>
+              </p>
+            )}
+            <Input
+              label="Folder name"
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              icon={<FolderPlus className="h-4 w-4" />}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleCreateFolder(); }}
+              autoFocus
+              placeholder="e.g. My Photos"
+            />
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" size="sm" onClick={() => { setCreateFolderOpen(false); setNewFolderName(''); }}>Cancel</Button>
+              <Button size="sm" onClick={handleCreateFolder} disabled={!newFolderName.trim()}>Create</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Rename dialog */}
       <Dialog open={!!renameItem} onOpenChange={(open) => !open && setRenameItem(null)}>

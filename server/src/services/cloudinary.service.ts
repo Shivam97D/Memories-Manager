@@ -124,9 +124,12 @@ export class CloudinaryService implements StorageAdapter {
     });
   }
 
-  async getSignedDownloadUrl(publicId: string, expiresInSeconds = 3600): Promise<string> {
-    return this.cld.utils.private_download_url(publicId, 'jpg', {
-      expires_at: Math.round(Date.now() / 1000) + expiresInSeconds,
+  async getSignedDownloadUrl(publicId: string): Promise<string> {
+    // fl_attachment forces browser download; resource_type auto handles images, videos, and raw files.
+    return this.cld.url(publicId, {
+      flags: 'attachment',
+      resource_type: 'auto',
+      secure: true,
     });
   }
 

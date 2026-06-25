@@ -135,7 +135,8 @@ export class ImageKitService implements StorageAdapter {
     await this.ik.createFolder({ folderName, parentFolderPath });
   }
 
-  async renameResource(filePath: string, newFileName: string): Promise<void> {
+  async renameResource(filePath: string, toPath: string): Promise<void> {
+    const newFileName = toPath.split('/').filter(Boolean).pop()!;
     await this.ik.renameFile({ filePath, newFileName, purgeCache: false });
   }
 

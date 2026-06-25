@@ -76,6 +76,38 @@ router.delete('/:shareId/resource', async (req: AuthRequest, res: Response, next
   } catch (err) { next(err); }
 });
 
+// POST /proxy/:shareId/bulk-delete
+router.post('/:shareId/bulk-delete', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { share, account } = await resolveShare(req.params.shareId, req.user!.userId, 'DELETE');
+    const adapter = createAdapter(account.type, account.credentials);
+    const { publicIds, resourceType } = req.body as { publicIds: string[]; resourceType?: string };
+    if (!Array.isArray(publicIds) || publicIds.length === 0) {
+      res.status(400).json({ error: 'publicIds array required' });
+      return;
+    }
+    await Promise.all(publicIds.map((id) => adapter.deleteResource(id, resourceType)));
+    await log(req.user!.userId, req.params.shareId, String(account._id), 'BULK_DELETE', `${publicIds.length} items`);
+    res.json({ message: `Deleted ${publicIds.length} item(s)` });
+  } catch (err) { next(err); }
+});
+
+// POST /proxy/:shareId/bulk-download
+router.post('/:shareId/bulk-download', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { account } = await resolveShare(req.params.shareId, req.user!.userId, 'DOWNLOAD');
+    const adapter = createAdapter(account.type, account.credentials);
+    const { publicIds } = req.body as { publicIds: string[] };
+    if (!Array.isArray(publicIds) || publicIds.length === 0) {
+      res.status(400).json({ error: 'publicIds array required' });
+      return;
+    }
+    const urls = await Promise.all(publicIds.map((id) => adapter.getSignedDownloadUrl(id)));
+    await log(req.user!.userId, req.params.shareId, String(account._id), 'BULK_DOWNLOAD', `${publicIds.length} items`);
+    res.json({ urls });
+  } catch (err) { next(err); }
+});
+
 // GET /proxy/:shareId/upload-params?folder=...
 router.get('/:shareId/upload-params', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {

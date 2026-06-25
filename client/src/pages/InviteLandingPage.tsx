@@ -46,7 +46,9 @@ export function InviteLandingPage() {
   const [loadingInvite, setLoadingInvite] = useState(true);
   const [accepting, setAccepting] = useState(false);
   const [accepted, setAccepted] = useState(false);
-  const [shareId, setShareId] = useState<string | null>(null);
+  const [shareNav, setShareNav] = useState<{
+    id: string; path: string; permissions: string[]; accountType: string;
+  } | null>(null);
 
   // 1. Load public invite details
   useEffect(() => {
@@ -69,7 +71,14 @@ export function InviteLandingPage() {
     setAccepting(true);
     try {
       const { data } = await api.post(`/invites/${token}/accept`);
-      setShareId(data.share._id);
+      const s = data.share;
+      const acc = s.storageAccountId as { type: string };
+      setShareNav({
+        id: s._id,
+        path: s.resourcePath,
+        permissions: s.permissions,
+        accountType: acc?.type || 'cloudinary',
+      });
       setAccepted(true);
       toast.success('Access granted!');
     } catch (err: unknown) {
@@ -81,8 +90,16 @@ export function InviteLandingPage() {
   };
 
   const goToShared = () => {
-    if (shareId) navigate(`/shared-manager/${shareId}`);
-    else navigate('/shares');
+    if (shareNav) {
+      navigate(
+        `/shared-manager/${shareNav.id}` +
+        `?permissions=${shareNav.permissions.join(',')}` +
+        `&path=${encodeURIComponent(shareNav.path)}` +
+        `&type=${shareNav.accountType}`
+      );
+    } else {
+      navigate('/shares');
+    }
   };
 
   if (loadingInvite) {

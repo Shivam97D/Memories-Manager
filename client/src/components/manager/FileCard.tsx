@@ -56,7 +56,7 @@ export function FileCard({
   const isFolder    = item.type === 'folder';
   const hasMenu     = canDelete || canDownload || canShare || canEdit || !!onPreview;
 
-  // Long-press timer — fires the context menu on touch devices
+  // Long-press timer — enters selection mode on files, opens menu on folders
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didLongPress   = useRef(false);
 
@@ -64,9 +64,15 @@ export function FileCard({
     didLongPress.current = false;
     longPressTimer.current = setTimeout(() => {
       didLongPress.current = true;
-      if (hasMenu && !selectionMode) setMenuOpen(true);
+      if (!isFolder && onSelect && !selectionMode) {
+        // File long-press → enter selection mode and select this item
+        onSelect(item);
+      } else if (hasMenu && !selectionMode) {
+        // Folder long-press → open context menu
+        setMenuOpen(true);
+      }
     }, LONG_PRESS_MS);
-  }, [hasMenu, selectionMode]);
+  }, [hasMenu, selectionMode, isFolder, onSelect, item]);
 
   const cancelLongPress = useCallback(() => {
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
