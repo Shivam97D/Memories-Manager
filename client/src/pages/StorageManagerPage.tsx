@@ -197,13 +197,14 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
   const selectAll = () => setSelectedIds(new Set(fileItems.map((i) => i.id)));
   const clearSelection = () => { setSelectedIds(new Set()); setIsSelecting(false); };
 
-  // Create folder
+  // Create folder — works for both owned and shared views
   const handleCreateFolder = async () => {
     const name = newFolderName.trim();
     if (!name) return;
     const path = currentPath ? `${currentPath}/${name}` : name;
     try {
-      await api.post(`/storage/${accountId}/folder`, { path });
+      const url = shareId ? `/proxy/${shareId}/folder` : `/storage/${accountId}/folder`;
+      await api.post(url, { path });
       setCreateFolderOpen(false);
       setNewFolderName('');
       refetch();
@@ -325,7 +326,7 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
             </>
           )}
 
-          {permissions.includes('EDIT') && !shareId && !selectionMode && (
+          {permissions.includes('EDIT') && !selectionMode && (
             <Button variant="outline" size="sm" onClick={() => { setNewFolderName(''); setCreateFolderOpen(true); }}>
               <FolderPlus className="h-3.5 w-3.5" />
               New Folder

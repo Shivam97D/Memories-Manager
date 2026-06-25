@@ -127,6 +127,22 @@ router.get('/:shareId/upload-params', async (req: AuthRequest, res: Response, ne
   } catch (err) { next(err); }
 });
 
+// POST /proxy/:shareId/folder
+router.post('/:shareId/folder', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { share, account } = await resolveShare(req.params.shareId, req.user!.userId, 'EDIT');
+    const adapter = createAdapter(account.type, account.credentials);
+    const { path } = req.body as { path: string };
+    if (!path.startsWith(share.resourcePath)) {
+      res.status(403).json({ error: 'Cannot create folder outside the shared path' });
+      return;
+    }
+    await adapter.createFolder(path);
+    await log(req.user!.userId, req.params.shareId, String(account._id), 'CREATE_FOLDER', path);
+    res.json({ message: 'Folder created' });
+  } catch (err) { next(err); }
+});
+
 // GET /proxy/:shareId/transform?publicId=...
 router.get('/:shareId/transform', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
