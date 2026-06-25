@@ -229,7 +229,7 @@ router.post('/:accountId/bulk-copy', async (req: AuthRequest, res: Response, nex
     const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
     const adapter = createAdapter(account.type, account.credentials);
     const { items, destFolder } = req.body as {
-      items: { publicId: string; path: string }[];
+      items: { publicId: string; path: string; mimeType?: string }[];
       destFolder: string;
     };
 
@@ -242,7 +242,7 @@ router.post('/:accountId/bulk-copy', async (req: AuthRequest, res: Response, nex
     await Promise.all(
       items.map((item) => {
         const source = account.type === 'IMAGEKIT' ? item.path : item.publicId;
-        return adapter.copyResource(source, destFolder);
+        return adapter.copyResource(source, destFolder, item.mimeType);
       })
     );
 

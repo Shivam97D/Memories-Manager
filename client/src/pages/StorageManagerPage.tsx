@@ -47,6 +47,7 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
   const [bulkActing, setBulkActing] = useState(false);
   const [isSelecting, setIsSelecting] = useState(false);
   const [copyDialogOpen, setCopyDialogOpen] = useState(false);
+  const [bulkMoveDialogOpen, setBulkMoveDialogOpen] = useState(false);
   const [moveDialogItem, setMoveDialogItem] = useState<MediaItem | null>(null);
   const [copySingleItem, setCopySingleItem] = useState<MediaItem | null>(null);
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
@@ -183,12 +184,33 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
     if (selectedItems.length === 0) return;
     setBulkActing(true);
     try {
-      const copyItems = selectedItems.map((i) => ({ publicId: i.publicId || i.id, path: i.path }));
+      const copyItems = selectedItems.map((i) => ({ publicId: i.publicId || i.id, path: i.path, mimeType: i.mimeType }));
       await api.post(`/storage/${accountId}/bulk-copy`, { items: copyItems, destFolder });
       toast.success(`Copied ${selectedItems.length} file(s) to ${destFolder.split('/').pop()}`);
       if (destFolder === currentPath) refetch();
     } catch {
       toast.error('Copy failed');
+    } finally {
+      setBulkActing(false);
+    }
+  };
+
+  // Bulk move
+  const handleBulkMove = async (destFolder: string) => {
+    if (selectedItems.length === 0) return;
+    setBulkActing(true);
+    try {
+      await Promise.all(
+        selectedItems.map((i) =>
+          api.patch(`/storage/${accountId}/resource/move`, { fromPath: i.path, destFolder, mimeType: i.mimeType })
+        )
+      );
+      setSelectedIds(new Set());
+      setIsSelecting(false);
+      refetch();
+      toast.success(`Moved ${selectedItems.length} file(s) to ${destFolder.split('/').pop()}`);
+    } catch {
+      toast.error('Move failed');
     } finally {
       setBulkActing(false);
     }
@@ -266,7 +288,7 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
     try {
       const source = accountType === 'IMAGEKIT' ? copySingleItem.path : (copySingleItem.publicId || copySingleItem.id);
       await api.post(`/storage/${accountId}/bulk-copy`, {
-        items: [{ publicId: source, path: copySingleItem.path }],
+        items: [{ publicId: source, path: copySingleItem.path, mimeType: copySingleItem.mimeType }],
         destFolder,
       });
       setCopySingleItem(null);
@@ -486,6 +508,19 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
               size="sm"
               variant="ghost"
               className="h-8 gap-1.5 text-xs"
+              onClick={() => setBulkMoveDialogOpen(true)}
+              disabled={bulkActing}
+            >
+              <Move className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Move to…</span>
+            </Button>
+          )}
+
+          {permissions.includes('EDIT') && !shareId && accountId && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 gap-1.5 text-xs"
               onClick={() => setCopyDialogOpen(true)}
               disabled={bulkActing}
             >
@@ -553,6 +588,19 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
           rootPath={rootPath}
           title={`Copy ${selectedItems.length} file${selectedItems.length !== 1 ? 's' : ''} to…`}
           actionLabel="Copy here"
+        />
+      )}
+
+      {/* Bulk move-to folder picker */}
+      {accountId && rootPath !== null && (
+        <FolderPickerDialog
+          open={bulkMoveDialogOpen}
+          onClose={() => setBulkMoveDialogOpen(false)}
+          onSelect={handleBulkMove}
+          accountId={accountId}
+          rootPath={rootPath}
+          title={`Move ${selectedItems.length} file${selectedItems.length !== 1 ? 's' : ''} to…`}
+          actionLabel="Move here"
         />
       )}
 

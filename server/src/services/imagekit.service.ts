@@ -187,7 +187,7 @@ export class ImageKitService implements StorageAdapter {
     await this.ikx.moveFile({ sourceFilePath: fromPath, destinationPath: dst });
   }
 
-  async copyResource(filePath: string, destFolder: string): Promise<void> {
+  async copyResource(filePath: string, destFolder: string, _mimeType?: string): Promise<void> {
     const dst = destFolder.startsWith('/') ? destFolder : `/${destFolder}`;
     await this.ikx.copyFile({ sourceFilePath: filePath, destinationPath: dst });
   }
