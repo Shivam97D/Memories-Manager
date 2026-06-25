@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
-import { Folder, FileImage, FileVideo, File, MoreVertical, Download, Trash2, Share2, Eye, Pencil, Check } from 'lucide-react';
+import { Folder, FileImage, FileVideo, File, MoreVertical, Download, Trash2, Share2, Eye, Pencil, Check, Move, Copy } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { MediaItem, Permission } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,8 @@ interface Props {
   onShare?: (item: MediaItem) => void;
   onPreview?: (item: MediaItem) => void;
   onRename?: (item: MediaItem) => void;
+  onMove?: (item: MediaItem) => void;
+  onCopySingle?: (item: MediaItem) => void;
   onSelect?: (item: MediaItem) => void;
   selected?: boolean;
   selectionMode?: boolean;
@@ -39,6 +41,8 @@ export function FileCard({
   onShare,
   onPreview,
   onRename,
+  onMove,
+  onCopySingle,
   onSelect,
   selected = false,
   selectionMode = false,
@@ -48,15 +52,17 @@ export function FileCard({
   const [imgError, setImgError] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const isImage = item.type === 'file' && item.mimeType?.startsWith('image/');
+  const isImage = item.type === 'file' && (item.mimeType?.startsWith('image/') ?? false);
+  const isFolder = item.type === 'folder';
   const canDelete   = permissions.includes('DELETE')   && !!onDelete;
-  const canDownload = permissions.includes('DOWNLOAD') && !!onDownload;
+  const canDownload = permissions.includes('DOWNLOAD') && !!onDownload && !isFolder;
   const canEdit     = permissions.includes('EDIT')     && !!onRename;
   const canShare    = !isSharedView && !!onShare;
-  const isFolder    = item.type === 'folder';
-  const hasMenu     = canDelete || canDownload || canShare || canEdit || !!onPreview;
+  const canMove     = permissions.includes('EDIT')     && !!onMove && !isFolder;
+  const canCopy     = permissions.includes('EDIT')     && !!onCopySingle && !isFolder;
+  const hasMenu     = canDelete || canDownload || canShare || canEdit || canMove || canCopy || !!onPreview;
 
-  // Long-press timer — enters selection mode on files, opens menu on folders
+  // Long-press: files → selection mode; folders → context menu
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didLongPress   = useRef(false);
 
@@ -65,10 +71,8 @@ export function FileCard({
     longPressTimer.current = setTimeout(() => {
       didLongPress.current = true;
       if (!isFolder && onSelect && !selectionMode) {
-        // File long-press → enter selection mode and select this item
         onSelect(item);
       } else if (hasMenu && !selectionMode) {
-        // Folder long-press → open context menu
         setMenuOpen(true);
       }
     }, LONG_PRESS_MS);
@@ -78,7 +82,6 @@ export function FileCard({
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
   }, []);
 
-  // contextmenu fires on: desktop right-click, Android long-press, iOS long-press (iOS 13+)
   const handleContextMenu = (e: React.MouseEvent) => {
     if (!hasMenu || selectionMode) return;
     e.preventDefault();
@@ -87,7 +90,6 @@ export function FileCard({
   };
 
   const handleClick = (e: React.MouseEvent) => {
-    // Swallow tap that ended a long-press so we don't also navigate
     if (didLongPress.current) { didLongPress.current = false; return; }
     if (selectionMode && onSelect) { e.preventDefault(); onSelect(item); return; }
     onOpen(item);
@@ -125,7 +127,7 @@ export function FileCard({
           </div>
         )}
 
-        {/* Desktop-only hover overlay (touch devices use three-dot / long-press) */}
+        {/* Desktop hover overlay for images */}
         {isImage && !selectionMode && (
           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity hidden sm:flex items-center justify-center gap-2">
             <Button
@@ -173,21 +175,13 @@ export function FileCard({
             )}
           </div>
 
-          {/* Three-dot menu
-              - Always visible on mobile (touch has no hover)
-              - Hover-only on desktop (sm+) to keep grid clean
-              - Controlled open state so long-press / contextmenu can trigger it */}
           {!selectionMode && hasMenu && (
             <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
               <DropdownMenu.Trigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className={cn(
-                    'h-6 w-6 flex-shrink-0 transition-opacity',
-                    // always visible on mobile; fade in on desktop hover
-                    'opacity-100 sm:opacity-0 sm:group-hover:opacity-100'
-                  )}
+                  className="h-6 w-6 flex-shrink-0 transition-opacity opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
                   onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
                 >
                   <MoreVertical className="h-3 w-3" />
@@ -196,7 +190,7 @@ export function FileCard({
 
               <DropdownMenu.Portal>
                 <DropdownMenu.Content
-                  className="z-50 min-w-[160px] rounded-xl border border-border bg-card shadow-xl p-1"
+                  className="z-50 min-w-[170px] rounded-xl border border-border bg-card shadow-xl p-1"
                   sideOffset={4}
                   align="end"
                   onClick={(e) => e.stopPropagation()}
@@ -204,7 +198,7 @@ export function FileCard({
                   {onPreview && isImage && (
                     <DropdownMenu.Item
                       className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-secondary outline-none"
-                      onSelect={() => { onPreview(item); }}
+                      onSelect={() => onPreview(item)}
                     >
                       <Eye className="h-3.5 w-3.5" /> Preview
                     </DropdownMenu.Item>
@@ -217,12 +211,28 @@ export function FileCard({
                       <Download className="h-3.5 w-3.5" /> Download
                     </DropdownMenu.Item>
                   )}
-                  {canEdit && !isFolder && (
+                  {canEdit && (
                     <DropdownMenu.Item
                       className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-secondary outline-none"
                       onSelect={() => onRename!(item)}
                     >
                       <Pencil className="h-3.5 w-3.5" /> Rename
+                    </DropdownMenu.Item>
+                  )}
+                  {canMove && (
+                    <DropdownMenu.Item
+                      className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-secondary outline-none"
+                      onSelect={() => onMove!(item)}
+                    >
+                      <Move className="h-3.5 w-3.5" /> Move to…
+                    </DropdownMenu.Item>
+                  )}
+                  {canCopy && (
+                    <DropdownMenu.Item
+                      className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-secondary outline-none"
+                      onSelect={() => onCopySingle!(item)}
+                    >
+                      <Copy className="h-3.5 w-3.5" /> Copy to…
                     </DropdownMenu.Item>
                   )}
                   {canShare && (

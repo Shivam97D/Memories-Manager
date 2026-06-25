@@ -45,11 +45,14 @@ export interface Transform {
 export interface StorageAdapter {
   listFolder(path: string, cursor?: string): Promise<FolderContents>;
   getSignedUploadParams(folder: string, fileName: string): Promise<Record<string, string>>;
-  deleteResource(publicId: string, resourceType?: string): Promise<void>;
+  deleteResource(publicId: string, mimeType?: string): Promise<void>;
+  deleteFolder(path: string): Promise<void>;
   getTransformUrl(publicId: string, transforms: Transform[]): string;
   getSignedDownloadUrl(publicId: string, expiresInSeconds?: number): Promise<string>;
   getUsage(): Promise<StorageUsage>;
   createFolder(path: string): Promise<void>;
-  renameResource(fromPath: string, toPath: string): Promise<void>;
+  renameResource(fromPath: string, toPath: string, mimeType?: string): Promise<void>;
+  renameFolder(fromPath: string, toPath: string): Promise<void>;
+  moveResource(fromPath: string, destFolder: string, mimeType?: string): Promise<void>;
   copyResource(source: string, destFolder: string): Promise<void>;
 }

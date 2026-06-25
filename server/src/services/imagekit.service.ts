@@ -13,8 +13,16 @@ export interface ImageKitCredentials {
   urlEndpoint: string;
 }
 
+type IKExtra = {
+  moveFile: (o: { sourceFilePath: string; destinationPath: string }) => Promise<void>;
+  copyFile: (o: { sourceFilePath: string; destinationPath: string }) => Promise<void>;
+  moveFolder: (o: { sourceFolderPath: string; destinationPath: string }) => Promise<void>;
+  deleteFolder: (folderPath: string) => Promise<void>;
+};
+
 export class ImageKitService implements StorageAdapter {
   private ik: ImageKit;
+  private ikx: IKExtra;
   private urlEndpoint: string;
 
   constructor(creds: ImageKitCredentials) {
@@ -23,6 +31,7 @@ export class ImageKitService implements StorageAdapter {
       privateKey: creds.privateKey,
       urlEndpoint: creds.urlEndpoint,
     });
+    this.ikx = this.ik as unknown as IKExtra;
     this.urlEndpoint = creds.urlEndpoint;
   }
 
@@ -96,6 +105,17 @@ export class ImageKitService implements StorageAdapter {
     await this.ik.deleteFile(fileId);
   }
 
+  async deleteFolder(path: string): Promise<void> {
+    const folderPath = path.startsWith('/') ? path : `/${path}`;
+    // Bulk-delete all files inside first, then remove the folder
+    try {
+      const files = await this.ik.listFiles({ path: folderPath, limit: 1000 } as Parameters<typeof this.ik.listFiles>[0]);
+      const ids = (files as Array<{ fileId: string }>).map((f) => f.fileId);
+      if (ids.length) await this.ik.bulkDeleteFiles(ids);
+    } catch { /* ignore listing errors for empty folders */ }
+    await this.ikx.deleteFolder(folderPath);
+  }
+
   getTransformUrl(fileId: string, transforms: Transform[]): string {
     const t = transforms[0] || {};
     return this.ik.url({
@@ -118,14 +138,8 @@ export class ImageKitService implements StorageAdapter {
   }
 
   async getUsage(): Promise<StorageUsage> {
-    // ImageKit doesn't expose a direct usage API; return approximate values
-    const totalBytes = 20 * 1024 * 1024 * 1024; // 20GB free tier
-    return {
-      usedBytes: 0,
-      totalBytes,
-      usedMB: 0,
-      totalMB: 20 * 1024,
-    };
+    const totalBytes = 20 * 1024 * 1024 * 1024;
+    return { usedBytes: 0, totalBytes, usedMB: 0, totalMB: 20 * 1024 };
   }
 
   async createFolder(path: string): Promise<void> {
@@ -140,10 +154,41 @@ export class ImageKitService implements StorageAdapter {
     await this.ik.renameFile({ filePath, newFileName, purgeCache: false });
   }
 
+  async renameFolder(fromPath: string, toPath: string): Promise<void> {
+    // ImageKit has no direct rename-folder API.
+    // Simulate by creating the new folder, moving all files, deleting old folder.
+    const srcPath = fromPath.startsWith('/') ? fromPath : `/${fromPath}`;
+    const dstPath = toPath.startsWith('/') ? toPath : `/${toPath}`;
+
+    // Create destination folder
+    const parts = dstPath.split('/').filter(Boolean);
+    const folderName = parts.pop()!;
+    const parentFolderPath = '/' + parts.join('/');
+    await this.ik.createFolder({ folderName, parentFolderPath });
+
+    // Move all files from source into destination
+    try {
+      const files = await this.ik.listFiles({ path: srcPath, limit: 1000 } as Parameters<typeof this.ik.listFiles>[0]);
+      await Promise.all(
+        (files as Array<{ filePath: string }>).map((f) =>
+          this.ikx.moveFile({ sourceFilePath: f.filePath, destinationPath: dstPath })
+        )
+      );
+    } catch { /* if no files, continue */ }
+
+    // Delete old folder
+    try {
+      await this.ikx.deleteFolder(srcPath);
+    } catch { /* ignore if not empty / already gone */ }
+  }
+
+  async moveResource(fromPath: string, destFolder: string): Promise<void> {
+    const dst = destFolder.startsWith('/') ? destFolder : `/${destFolder}`;
+    await this.ikx.moveFile({ sourceFilePath: fromPath, destinationPath: dst });
+  }
+
   async copyResource(filePath: string, destFolder: string): Promise<void> {
-    const filename = filePath.split('/').filter(Boolean).pop()!;
-    const destinationPath = `${destFolder}/${filename}`;
-    await (this.ik as unknown as { copyFile: (o: object) => Promise<void> })
-      .copyFile({ sourceFilePath: filePath, destinationPath });
+    const dst = destFolder.startsWith('/') ? destFolder : `/${destFolder}`;
+    await this.ikx.copyFile({ sourceFilePath: filePath, destinationPath: dst });
   }
 }

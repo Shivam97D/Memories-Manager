@@ -69,10 +69,41 @@ router.delete('/:shareId/resource', async (req: AuthRequest, res: Response, next
   try {
     const { share, account } = await resolveShare(req.params.shareId, req.user!.userId, 'DELETE');
     const adapter = createAdapter(account.type, account.credentials);
-    const { publicId, resourceType } = req.body as { publicId: string; resourceType?: string };
-    await adapter.deleteResource(publicId, resourceType);
+    const { publicId, mimeType } = req.body as { publicId: string; mimeType?: string };
+    await adapter.deleteResource(publicId, mimeType);
     await log(req.user!.userId, req.params.shareId, String(account._id), 'DELETE', publicId);
     res.json({ message: 'Deleted' });
+  } catch (err) { next(err); }
+});
+
+// DELETE /proxy/:shareId/folder
+router.delete('/:shareId/folder', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { share, account } = await resolveShare(req.params.shareId, req.user!.userId, 'DELETE');
+    const adapter = createAdapter(account.type, account.credentials);
+    const { path } = req.body as { path: string };
+    if (!path || !path.startsWith(share.resourcePath)) {
+      res.status(403).json({ error: 'Cannot delete outside the shared path' }); return;
+    }
+    await adapter.deleteFolder(path);
+    await log(req.user!.userId, req.params.shareId, String(account._id), 'DELETE_FOLDER', path);
+    res.json({ message: 'Folder deleted' });
+  } catch (err) { next(err); }
+});
+
+// PATCH /proxy/:shareId/resource/move
+router.patch('/:shareId/resource/move', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const { share, account } = await resolveShare(req.params.shareId, req.user!.userId, 'EDIT');
+    const adapter = createAdapter(account.type, account.credentials);
+    const { fromPath, destFolder, mimeType } = req.body as { fromPath: string; destFolder: string; mimeType?: string };
+    if (!fromPath || !destFolder) { res.status(400).json({ error: 'fromPath and destFolder required' }); return; }
+    if (!destFolder.startsWith(share.resourcePath)) {
+      res.status(403).json({ error: 'Cannot move outside the shared path' }); return;
+    }
+    await adapter.moveResource(fromPath, destFolder, mimeType);
+    await log(req.user!.userId, req.params.shareId, String(account._id), 'MOVE', `${fromPath} → ${destFolder}`);
+    res.json({ message: 'Moved' });
   } catch (err) { next(err); }
 });
 

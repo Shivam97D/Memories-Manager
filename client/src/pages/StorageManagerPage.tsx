@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, FolderPlus, Upload as UploadIcon, RefreshCw,
   Trash2, Download, Share2, X, Pencil,
-  Loader2, Copy, HardDrive, CheckSquare, Square,
+  Loader2, Copy, HardDrive, CheckSquare, Square, Move,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { MediaItem, FolderContents, Permission, ResourceType, StorageUsage } from '@/types';
@@ -47,6 +47,8 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
   const [bulkActing, setBulkActing] = useState(false);
   const [isSelecting, setIsSelecting] = useState(false);
   const [copyDialogOpen, setCopyDialogOpen] = useState(false);
+  const [moveDialogItem, setMoveDialogItem] = useState<MediaItem | null>(null);
+  const [copySingleItem, setCopySingleItem] = useState<MediaItem | null>(null);
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
 
@@ -102,18 +104,25 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
     }));
   };
 
-  // Single delete
+  // Delete (file or folder)
   const deleteMut = useMutation({
     mutationFn: (item: MediaItem) => {
+      if (item.type === 'folder') {
+        const url = shareId ? `/proxy/${shareId}/folder` : `/storage/${accountId}/folder`;
+        return api.delete(url, { data: { path: item.path } });
+      }
       const url = shareId ? `/proxy/${shareId}/resource` : `/storage/${accountId}/resource`;
-      return api.delete(url, { data: { publicId: item.publicId || item.id } });
+      return api.delete(url, { data: { publicId: item.publicId || item.id, mimeType: item.mimeType } });
     },
     onSuccess: () => { refetch(); toast.success('Deleted'); },
     onError: () => toast.error('Delete failed'),
   });
 
   const handleDelete = (item: MediaItem) => {
-    if (!confirm(`Delete "${item.name}"? This cannot be undone.`)) return;
+    const label = item.type === 'folder'
+      ? `Delete folder "${item.name}" and everything inside it? This cannot be undone.`
+      : `Delete "${item.name}"? This cannot be undone.`;
+    if (!confirm(label)) return;
     deleteMut.mutate(item);
   };
 
@@ -123,9 +132,9 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
     if (!confirm(`Delete ${selectedItems.length} item(s)? This cannot be undone.`)) return;
     setBulkActing(true);
     try {
-      const publicIds = selectedItems.map((i) => i.publicId || i.id);
+      const items = selectedItems.map((i) => ({ publicId: i.publicId || i.id, mimeType: i.mimeType }));
       const delUrl = shareId ? `/proxy/${shareId}/bulk-delete` : `/storage/${accountId}/bulk-delete`;
-      await api.post(delUrl, { publicIds });
+      await api.post(delUrl, { items });
       setSelectedIds(new Set());
       setIsSelecting(false);
       refetch();
@@ -212,23 +221,58 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
     } catch { toast.error('Failed to create folder'); }
   };
 
-  // Rename
+  // Rename (file or folder)
   const openRename = (item: MediaItem) => { setRenameItem(item); setRenameValue(item.name); };
   const handleRename = async () => {
     if (!renameItem || !renameValue.trim() || renameValue.trim() === renameItem.name) {
-      setRenameItem(null);
-      return;
+      setRenameItem(null); return;
     }
     try {
       const fromPath = renameItem.path;
-      const parts = fromPath.split('/');
+      const parts = fromPath.split('/').filter(Boolean);
       parts[parts.length - 1] = renameValue.trim();
-      const toPath = parts.join('/');
-      await api.patch(`/storage/${accountId}/resource/rename`, { fromPath, toPath });
+      const sep = fromPath.startsWith('/') ? '/' : '';
+      const toPath = sep + parts.join('/');
+
+      if (renameItem.type === 'folder') {
+        await api.patch(`/storage/${accountId}/folder/rename`, { fromPath, toPath });
+      } else {
+        await api.patch(`/storage/${accountId}/resource/rename`, { fromPath, toPath, mimeType: renameItem.mimeType });
+      }
       setRenameItem(null);
       refetch();
       toast.success('Renamed');
-    } catch { toast.error('Rename failed'); }
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Rename failed';
+      toast.error(msg);
+    }
+  };
+
+  // Move single file to a different folder
+  const handleMoveItem = async (destFolder: string) => {
+    if (!moveDialogItem) return;
+    try {
+      const url = shareId ? `/proxy/${shareId}/resource/move` : `/storage/${accountId}/resource/move`;
+      await api.patch(url, { fromPath: moveDialogItem.path, destFolder, mimeType: moveDialogItem.mimeType });
+      setMoveDialogItem(null);
+      refetch();
+      toast.success(`Moved to ${destFolder.split('/').pop()}`);
+    } catch { toast.error('Move failed'); }
+  };
+
+  // Copy single file
+  const handleCopySingle = async (destFolder: string) => {
+    if (!copySingleItem) return;
+    try {
+      const source = accountType === 'IMAGEKIT' ? copySingleItem.path : (copySingleItem.publicId || copySingleItem.id);
+      await api.post(`/storage/${accountId}/bulk-copy`, {
+        items: [{ publicId: source, path: copySingleItem.path }],
+        destFolder,
+      });
+      setCopySingleItem(null);
+      if (destFolder === currentPath) refetch();
+      toast.success(`Copied to ${destFolder.split('/').pop()}`);
+    } catch { toast.error('Copy failed'); }
   };
 
   const handleOpen = (item: MediaItem) => {
@@ -397,7 +441,9 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
                 onDownload={permissions.includes('DOWNLOAD') ? handleDownload : undefined}
                 onShare={!shareId && accountId ? (i) => setShareItem(i) : undefined}
                 onPreview={(i) => setPreviewItem(i)}
-                onRename={permissions.includes('EDIT') && !shareId ? openRename : undefined}
+                onRename={permissions.includes('EDIT') ? openRename : undefined}
+                onMove={permissions.includes('EDIT') && (accountId || shareId) ? (i) => setMoveDialogItem(i) : undefined}
+                onCopySingle={permissions.includes('EDIT') && !shareId && accountId ? (i) => setCopySingleItem(i) : undefined}
                 onSelect={toggleSelect}
                 selected={selectedIds.has(item.id)}
                 selectionMode={selectionMode}
@@ -497,7 +543,7 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
         />
       )}
 
-      {/* Copy-to folder picker */}
+      {/* Bulk copy-to folder picker */}
       {accountId && rootPath !== null && (
         <FolderPickerDialog
           open={copyDialogOpen}
@@ -506,6 +552,32 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
           accountId={accountId}
           rootPath={rootPath}
           title={`Copy ${selectedItems.length} file${selectedItems.length !== 1 ? 's' : ''} to…`}
+          actionLabel="Copy here"
+        />
+      )}
+
+      {/* Single file Move dialog */}
+      {(accountId || shareId) && rootPath !== null && (
+        <FolderPickerDialog
+          open={!!moveDialogItem}
+          onClose={() => setMoveDialogItem(null)}
+          onSelect={handleMoveItem}
+          accountId={accountId ?? ''}
+          rootPath={rootPath}
+          title={`Move "${moveDialogItem?.name}" to…`}
+          actionLabel="Move here"
+        />
+      )}
+
+      {/* Single file Copy dialog */}
+      {accountId && rootPath !== null && (
+        <FolderPickerDialog
+          open={!!copySingleItem}
+          onClose={() => setCopySingleItem(null)}
+          onSelect={handleCopySingle}
+          accountId={accountId}
+          rootPath={rootPath}
+          title={`Copy "${copySingleItem?.name}" to…`}
           actionLabel="Copy here"
         />
       )}
@@ -545,7 +617,7 @@ export function StorageManagerPage({ shareId, permissions: sharePerm, sharedRoot
       <Dialog open={!!renameItem} onOpenChange={(open) => !open && setRenameItem(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Rename</DialogTitle>
+            <DialogTitle>Rename {renameItem?.type === 'folder' ? 'Folder' : 'File'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-1">
             <p className="text-xs text-muted-foreground truncate">

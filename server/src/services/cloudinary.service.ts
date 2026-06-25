@@ -27,10 +27,17 @@ export class CloudinaryService implements StorageAdapter {
     });
   }
 
+  // Map MIME type → Cloudinary resource_type
+  private resourceType(mimeType?: string): 'image' | 'video' | 'raw' {
+    if (!mimeType) return 'image';
+    if (mimeType.startsWith('video/')) return 'video';
+    if (mimeType.startsWith('image/')) return 'image';
+    return 'raw';
+  }
+
   async listFolder(path = '', cursor?: string): Promise<FolderContents> {
     const folderPath = path || '';
 
-    // Get sub-folders
     const foldersResult = await this.cld.api.sub_folders(folderPath || '/').catch(() => ({ folders: [] }));
     const folders: MediaItem[] = (foldersResult.folders || []).map((f: { name: string; path: string }) => ({
       id: f.path,
@@ -39,10 +46,7 @@ export class CloudinaryService implements StorageAdapter {
       path: f.path,
     }));
 
-    // Get resources in folder
-    const searchExp = folderPath
-      ? `folder="${folderPath}"`
-      : 'folder=""';
+    const searchExp = folderPath ? `folder="${folderPath}"` : 'folder=""';
 
     const resourcesResult = await this.cld.search
       .expression(searchExp)
@@ -63,24 +67,31 @@ export class CloudinaryService implements StorageAdapter {
       secure_url: string;
       created_at: string;
       tags?: string[];
-    }) => ({
-      id: r.public_id,
-      name: r.display_name || r.public_id.split('/').pop() || r.public_id,
-      type: 'file' as const,
-      mimeType: r.resource_type === 'image' ? `image/${r.format}` : r.resource_type,
-      size: r.bytes,
-      width: r.width,
-      height: r.height,
-      url: r.secure_url,
-      thumbnailUrl: r.resource_type === 'image'
-        ? this.cld.url(r.public_id, { width: 300, height: 300, crop: 'fill', quality: 'auto' })
-        : r.secure_url,
-      publicId: r.public_id,
-      path: r.public_id,
-      format: r.format,
-      createdAt: new Date(r.created_at),
-      tags: r.tags,
-    }));
+    }) => {
+      const mime = r.resource_type === 'image'
+        ? `image/${r.format || 'jpeg'}`
+        : r.resource_type === 'video'
+          ? `video/${r.format || 'mp4'}`
+          : `application/${r.format || 'octet-stream'}`;
+      return {
+        id: r.public_id,
+        name: r.display_name || r.public_id.split('/').pop() || r.public_id,
+        type: 'file' as const,
+        mimeType: mime,
+        size: r.bytes,
+        width: r.width,
+        height: r.height,
+        url: r.secure_url,
+        thumbnailUrl: r.resource_type === 'image'
+          ? this.cld.url(r.public_id, { width: 300, height: 300, crop: 'fill', quality: 'auto' })
+          : r.secure_url,
+        publicId: r.public_id,
+        path: r.public_id,
+        format: r.format,
+        createdAt: new Date(r.created_at),
+        tags: r.tags,
+      };
+    });
 
     return {
       items: [...folders, ...files],
@@ -91,8 +102,6 @@ export class CloudinaryService implements StorageAdapter {
 
   async getSignedUploadParams(folder: string, _fileName: string): Promise<Record<string, string>> {
     const timestamp = Math.round(Date.now() / 1000);
-    // Only include params that will ALSO be sent in the form data — any mismatch
-    // between signed params and sent params causes Cloudinary to reject the upload.
     const sigParams = { timestamp, folder };
     const signature = this.cld.utils.api_sign_request(
       sigParams,
@@ -107,8 +116,18 @@ export class CloudinaryService implements StorageAdapter {
     };
   }
 
-  async deleteResource(publicId: string, resourceType = 'image'): Promise<void> {
-    await this.cld.uploader.destroy(publicId, { resource_type: resourceType as 'image' | 'video' | 'raw' });
+  async deleteResource(publicId: string, mimeType?: string): Promise<void> {
+    await this.cld.uploader.destroy(publicId, { resource_type: this.resourceType(mimeType) });
+  }
+
+  async deleteFolder(path: string): Promise<void> {
+    // Delete all assets inside (images, videos, raw) before removing the folder
+    await Promise.allSettled([
+      this.cld.api.delete_resources_by_prefix(path + '/', { resource_type: 'image' }),
+      this.cld.api.delete_resources_by_prefix(path + '/', { resource_type: 'video' }),
+      this.cld.api.delete_resources_by_prefix(path + '/', { resource_type: 'raw' }),
+    ]);
+    await this.cld.api.delete_folder(path);
   }
 
   getTransformUrl(publicId: string, transforms: Transform[]): string {
@@ -125,7 +144,6 @@ export class CloudinaryService implements StorageAdapter {
   }
 
   async getSignedDownloadUrl(publicId: string): Promise<string> {
-    // fl_attachment forces browser download; resource_type auto handles images, videos, and raw files.
     return this.cld.url(publicId, {
       flags: 'attachment',
       resource_type: 'auto',
@@ -149,8 +167,22 @@ export class CloudinaryService implements StorageAdapter {
     await this.cld.api.create_folder(path);
   }
 
-  async renameResource(fromPath: string, toPath: string): Promise<void> {
-    await this.cld.uploader.rename(fromPath, toPath);
+  async renameResource(fromPath: string, toPath: string, mimeType?: string): Promise<void> {
+    await this.cld.uploader.rename(fromPath, toPath, { resource_type: this.resourceType(mimeType) });
+  }
+
+  async renameFolder(fromPath: string, toPath: string): Promise<void> {
+    const api = this.cld.api as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+    if (typeof api.rename_folder !== 'function') {
+      throw Object.assign(new Error('Folder rename requires Cloudinary SDK v1.32+. Please update your SDK.'), { statusCode: 400 });
+    }
+    await api.rename_folder(fromPath, toPath);
+  }
+
+  async moveResource(fromPath: string, destFolder: string, mimeType?: string): Promise<void> {
+    const fileName = fromPath.split('/').filter(Boolean).pop()!;
+    const toPath = [destFolder, fileName].filter(Boolean).join('/');
+    await this.cld.uploader.rename(fromPath, toPath, { resource_type: this.resourceType(mimeType) });
   }
 
   async copyResource(publicId: string, destFolder: string): Promise<void> {

@@ -80,7 +80,13 @@ export function UploadZone({ accountId, accountType, currentPath, shareId, onUpl
   // Dropzone for desktop drag-and-drop; noClick because labels handle picking
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop: addFiles,
-    accept: { 'image/*': [], 'video/*': [], 'application/pdf': [] },
+    accept: {
+      'image/*': [],
+      'image/heic': ['.heic'],
+      'image/heif': ['.heif'],
+      'video/*': [],
+      'application/pdf': [],
+    },
     maxSize: 100 * 1024 * 1024,
     noClick: true,
     noKeyboard: true,
@@ -206,7 +212,7 @@ export function UploadZone({ accountId, accountType, currentPath, shareId, onUpl
               <div className="flex flex-wrap gap-2 justify-center w-full">
                 <FileTrigger
                   multiple
-                  accept="image/*,video/*,application/pdf"
+                  accept="image/*,image/heic,image/heif,.heic,.heif,video/*,application/pdf"
                   onChange={addFiles}
                   className="flex-1 sm:flex-none"
                 >
@@ -223,7 +229,7 @@ export function UploadZone({ accountId, accountType, currentPath, shareId, onUpl
 
                 {/* Camera — Android/iOS only; hidden on desktop */}
                 <FileTrigger
-                  accept="image/*,video/*"
+                  accept="image/*,image/heic,image/heif,.heic,.heif,video/*"
                   capture="environment"
                   onChange={addFiles}
                   className="flex-1 sm:hidden"

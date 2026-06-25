@@ -69,15 +69,28 @@ router.get('/:accountId/upload-params', async (req: AuthRequest, res: Response, 
   } catch (err) { next(err); }
 });
 
-// DELETE /storage/:accountId/resource — single delete
+// DELETE /storage/:accountId/resource — single file delete
 router.delete('/:accountId/resource', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
     const adapter = createAdapter(account.type, account.credentials);
-    const { publicId, resourceType } = req.body as { publicId: string; resourceType?: string };
-    await adapter.deleteResource(publicId, resourceType);
+    const { publicId, mimeType } = req.body as { publicId: string; mimeType?: string };
+    await adapter.deleteResource(publicId, mimeType);
     await log(req.user!.userId, req.params.accountId, 'DELETE', publicId);
     res.json({ message: 'Deleted' });
+  } catch (err) { next(err); }
+});
+
+// DELETE /storage/:accountId/folder — delete a folder and all its contents
+router.delete('/:accountId/folder', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
+    const adapter = createAdapter(account.type, account.credentials);
+    const { path } = req.body as { path: string };
+    if (!path) { res.status(400).json({ error: 'path required' }); return; }
+    await adapter.deleteFolder(path);
+    await log(req.user!.userId, req.params.accountId, 'DELETE_FOLDER', path);
+    res.json({ message: 'Folder deleted' });
   } catch (err) { next(err); }
 });
 
@@ -86,16 +99,19 @@ router.post('/:accountId/bulk-delete', async (req: AuthRequest, res: Response, n
   try {
     const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
     const adapter = createAdapter(account.type, account.credentials);
-    const { publicIds, resourceType } = req.body as { publicIds: string[]; resourceType?: string };
+    const { publicIds, items: itemsWithMime } = req.body as {
+      publicIds?: string[];
+      items?: { publicId: string; mimeType?: string }[];
+    };
 
-    if (!Array.isArray(publicIds) || publicIds.length === 0) {
-      res.status(400).json({ error: 'publicIds array required' });
-      return;
-    }
+    const toDelete: { publicId: string; mimeType?: string }[] = itemsWithMime ||
+      (publicIds || []).map((id) => ({ publicId: id }));
 
-    await Promise.all(publicIds.map((id) => adapter.deleteResource(id, resourceType)));
-    await log(req.user!.userId, req.params.accountId, 'BULK_DELETE', `${publicIds.length} items`);
-    res.json({ message: `Deleted ${publicIds.length} item(s)` });
+    if (!toDelete.length) { res.status(400).json({ error: 'publicIds or items required' }); return; }
+
+    await Promise.all(toDelete.map((item) => adapter.deleteResource(item.publicId, item.mimeType)));
+    await log(req.user!.userId, req.params.accountId, 'BULK_DELETE', `${toDelete.length} items`);
+    res.json({ message: `Deleted ${toDelete.length} item(s)` });
   } catch (err) { next(err); }
 });
 
@@ -117,21 +133,42 @@ router.post('/:accountId/bulk-download', async (req: AuthRequest, res: Response,
   } catch (err) { next(err); }
 });
 
-// PATCH /storage/:accountId/resource/rename
+// PATCH /storage/:accountId/resource/rename — rename a file
 router.patch('/:accountId/resource/rename', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
     const adapter = createAdapter(account.type, account.credentials);
-    const { fromPath, toPath } = req.body as { fromPath: string; toPath: string };
-
-    if (!fromPath || !toPath) {
-      res.status(400).json({ error: 'fromPath and toPath required' });
-      return;
-    }
-
-    await adapter.renameResource(fromPath, toPath);
+    const { fromPath, toPath, mimeType } = req.body as { fromPath: string; toPath: string; mimeType?: string };
+    if (!fromPath || !toPath) { res.status(400).json({ error: 'fromPath and toPath required' }); return; }
+    await adapter.renameResource(fromPath, toPath, mimeType);
     await log(req.user!.userId, req.params.accountId, 'RENAME', `${fromPath} → ${toPath}`);
     res.json({ message: 'Renamed' });
+  } catch (err) { next(err); }
+});
+
+// PATCH /storage/:accountId/folder/rename — rename a folder
+router.patch('/:accountId/folder/rename', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
+    const adapter = createAdapter(account.type, account.credentials);
+    const { fromPath, toPath } = req.body as { fromPath: string; toPath: string };
+    if (!fromPath || !toPath) { res.status(400).json({ error: 'fromPath and toPath required' }); return; }
+    await adapter.renameFolder(fromPath, toPath);
+    await log(req.user!.userId, req.params.accountId, 'RENAME_FOLDER', `${fromPath} → ${toPath}`);
+    res.json({ message: 'Folder renamed' });
+  } catch (err) { next(err); }
+});
+
+// PATCH /storage/:accountId/resource/move — move a file to a different folder
+router.patch('/:accountId/resource/move', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const account = await getOwnedAccount(req.params.accountId, req.user!.userId);
+    const adapter = createAdapter(account.type, account.credentials);
+    const { fromPath, destFolder, mimeType } = req.body as { fromPath: string; destFolder: string; mimeType?: string };
+    if (!fromPath || !destFolder) { res.status(400).json({ error: 'fromPath and destFolder required' }); return; }
+    await adapter.moveResource(fromPath, destFolder, mimeType);
+    await log(req.user!.userId, req.params.accountId, 'MOVE', `${fromPath} → ${destFolder}`);
+    res.json({ message: 'Moved' });
   } catch (err) { next(err); }
 });
 
